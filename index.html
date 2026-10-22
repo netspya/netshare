@@ -126,13 +126,7 @@ window.peerReady = new Promise(resolve => {
 </script>
 <script>
 const $ = id => document.getElementById(id);
-const ICE = { config: { iceServers: [
-  { urls: 'stun:stun.l.google.com:19302' },
-  { urls: 'stun:stun1.l.google.com:19302' },
-  { urls: 'stun:global.stun.twilio.com:3478' }
-] } };
-
-let peer = null;          // seu "endereço" pessoal (id aleatório)
+let peer = null;         // seu "endereço" pessoal (id aleatório)
 let lobby = null;         // endereço fixo da sala, só existe em quem a "segura"
 let lobbyConn = null;     // conexão com quem segura a sala
 let lobbyTry = false;
@@ -148,6 +142,7 @@ const members = new Map(); // (só quem segura a sala) ids já aprovados
 const slug = s => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim()
   .replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'sala';
 const msg = t => { $('msg').textContent = t || ''; };
+const msgText = () => $('msg').textContent || '';
 
 /* ---------- Entrada na sala ---------- */
 async function hashPass(room, pass) {
@@ -203,7 +198,8 @@ function closeAll() {
 function start() {
   closeAll(); resetState();
   leaving = false; denied = false;
-  const me = new Peer(undefined, ICE);
+  // Sem opções extras: usa os servidores de rede padrão do PeerJS (inclui retransmissão para redes difíceis).
+  const me = new Peer();
   peer = me;
 
   me.on('open', () => {
@@ -241,10 +237,10 @@ function tryLobby() {
     if (leaving || !peer) { try { l.destroy(); } catch (e) {} return; }
     lobby = l;
     members.clear();
-    members.set(peer.id, true);
-    people.forEach((_, id) => members.set(id, true));
+    members.set(peer.id, myName);
+    people.forEach((p, id) => members.set(id, p.name));
     l.on('connection', handleLobbyConn);
-    msg('');
+    if (!people.size) msg('Sala criada. Aguardando outras pessoas...');
   });
   l.on('error', e => {
     if (e.type === 'unavailable-id') {
@@ -270,9 +266,15 @@ function handleLobbyConn(c) {
       setTimeout(() => { try { c.close(); } catch (_) {} }, 600);
       return;
     }
+    const norm = s => String(s || '').trim().toLowerCase();
+    if ([...members.entries()].some(([id, n]) => id !== d.id && norm(n) === norm(d.name))) {
+      c.send({ t: 'denied', reason: 'name' });
+      setTimeout(() => { try { c.close(); } catch (_) {} }, 600);
+      return;
+    }
     c.memberId = d.id;
     c.send({ t: 'peers', list: [...members.keys()].filter(id => id !== d.id) });
-    members.set(d.id, true);
+    members.set(d.id, d.name);
   });
   c.on('close', () => { if (c.memberId) members.delete(c.memberId); });
 }
@@ -284,7 +286,10 @@ function joinLobby() {
   lobbyConn = c;
   c.on('open', () => c.send({ t: 'join', id: peer.id, name: myName, pass: roomPass }));
   c.on('data', d => {
-    if (d.t === 'peers') { d.list.forEach(dial); msg(''); }
+    if (d.t === 'peers') {
+      msg(d.list.length ? 'Conectando com os participantes...' : 'Sala encontrada. Aguardando outras pessoas...');
+      d.list.forEach(id => dial(id));
+    }
     else if (d.t === 'denied') { denied = true; kickOut(d.reason); }
   });
   c.on('close', () => { if (lobbyConn === c) { lobbyConn = null; retryLobby(); } });
@@ -295,7 +300,8 @@ function retryLobby() {
   setTimeout(() => { lobbyConn = null; tryLobby(); }, 400 + Math.random() * 1200);
 }
 function kickOut(reason) {
-  const text = reason === 'required' ? 'Esta sala exige senha. Digite a senha para entrar.'
+  const text = reason === 'name' ? 'Já existe alguém com esse nome nesta sala. Escolha outro nome (ou aguarde alguns segundos se você acabou de recarregar a página).'
+    : reason === 'required' ? 'Esta sala exige senha. Digite a senha para entrar.'
     : reason === 'open' ? 'Esta sala não usa senha. Deixe o campo de senha vazio.'
     : 'Senha incorreta.';
   leaveRoom();
@@ -328,7 +334,8 @@ function setupConn(c) {
   c.on('data', d => {
     if (d.t === 'hello') {
       people.set(c.peer, { name: d.name, sharing: d.sharing, kind: d.kind });
-      if (lobby) members.set(c.peer, true);
+      if (lobby) members.set(c.peer, d.name);
+      if (msgText().startsWith('Conectando') || msgText().startsWith('Sala ')) msg('');
       render();
     } else if (d.t === 'sharing') {
       const p = people.get(c.peer);
