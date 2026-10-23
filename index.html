@@ -85,12 +85,14 @@
   <p id="joinErr"></p>
   <button id="btnJoin" data-i18n="btnJoin"></button>
   <p class="mut" data-i18n="joinNote"></p>
+  <p class="mut" id="verTxt" style="text-align:center;margin:0"></p>
 </section>
 
 <section id="room" class="hidden">
   <header>
     <h2><span data-i18n="roomLbl"></span> <span id="roomName"></span></h2>
     <span id="msg"></span>
+    <span id="status" class="mut"></span>
     <button id="btnLink" class="sec" data-i18n="copyLink"></button>
   </header>
 
@@ -162,7 +164,9 @@ const I18N = {
   confirmOwner:'Passar a posse da sala para {name}? Você perderá os poderes de dono.',
   badgeCam:'● câmera', badgeScreen:'● tela', tagCam:'câmera', tagScreen:'tela', noAudio:'sem áudio',
   searching:'Procurando a sala...', created:'Sala criada. Aguardando outras pessoas...',
-  connFail:'Não foi possível conectar com um participante (a rede dele pode estar restritiva).',
+  connFail:'Não foi possível conectar com um participante: a rede bloqueou a conexão direta (comum em 4G/5G e em redes de empresa ou escola). Tente outra rede, como Wi-Fi.',
+  oldVersion:'O site de {name} está em outra versão (v{ver}). Peça para recarregar a página (Ctrl+F5) e faça o mesmo no seu aparelho.',
+  statusLine:'Servidor: {srv} · vaga {slot} · conectados: {n} · v{ver}', srvOk:'ok', srvOff:'sem conexão', srvWait:'conectando',
   serverDown:'Servidor de conexão indisponível. Tentando de novo...', reconnecting:'Reconectando à sala...', errConn:'Erro de conexão: {e}',
   eName:'Já existe alguém com esse nome nesta sala. Escolha outro nome (ou aguarde alguns segundos se você acabou de recarregar a página).',
   eRequired:'Esta sala exige senha. Digite a senha para entrar.', eOpen:'Esta sala não usa senha. Deixe o campo de senha vazio.',
@@ -201,7 +205,9 @@ const I18N = {
   confirmOwner:'Make {name} the room owner? You will lose the owner powers.',
   badgeCam:'● camera', badgeScreen:'● screen', tagCam:'camera', tagScreen:'screen', noAudio:'no audio',
   searching:'Looking for the room...', created:'Room created. Waiting for other people...',
-  connFail:'Could not connect to a participant (their network may be restrictive).',
+  connFail:'Could not connect to a participant: the network blocked the direct connection (common on 4G/5G and company or school networks). Try another network, such as Wi-Fi.',
+  oldVersion:'{name}\'s site is on a different version (v{ver}). Ask them to reload the page (Ctrl+F5) and do the same on your device.',
+  statusLine:'Server: {srv} · slot {slot} · connected: {n} · v{ver}', srvOk:'ok', srvOff:'offline', srvWait:'connecting',
   serverDown:'Connection server unavailable. Trying again...', reconnecting:'Reconnecting to the room...', errConn:'Connection error: {e}',
   eName:'Someone with that name is already in this room. Choose another name (or wait a few seconds if you just reloaded the page).',
   eRequired:'This room requires a password. Type the password to join.', eOpen:'This room has no password. Leave the password field empty.',
@@ -240,7 +246,9 @@ const I18N = {
   confirmOwner:'Passar a posse da sala para {name}? Perderá os poderes de dono.',
   badgeCam:'● câmara', badgeScreen:'● ecrã', tagCam:'câmara', tagScreen:'ecrã', noAudio:'sem áudio',
   searching:'A procurar a sala...', created:'Sala criada. A aguardar outras pessoas...',
-  connFail:'Não foi possível ligar a um participante (a rede dele pode ser restritiva).',
+  connFail:'Não foi possível ligar a um participante: a rede bloqueou a ligação direta (comum em 4G/5G e redes de empresas ou escolas). Tente outra rede, como Wi-Fi.',
+  oldVersion:'O site de {name} está noutra versão (v{ver}). Peça para recarregar a página (Ctrl+F5) e faça o mesmo no seu dispositivo.',
+  statusLine:'Servidor: {srv} · vaga {slot} · ligados: {n} · v{ver}', srvOk:'ok', srvOff:'sem ligação', srvWait:'a ligar',
   serverDown:'Servidor de ligação indisponível. A tentar novamente...', reconnecting:'A religar à sala...', errConn:'Erro de ligação: {e}',
   eName:'Já existe alguém com esse nome nesta sala. Escolha outro nome (ou aguarde alguns segundos se acabou de recarregar a página).',
   eRequired:'Esta sala exige palavra-passe. Escreva a palavra-passe para entrar.', eOpen:'Esta sala não usa palavra-passe. Deixe o campo vazio.',
@@ -334,6 +342,7 @@ $('join').addEventListener('focusin', () => loadPeer(), { once: true });
    vídeo passa por um servidor de retransmissão (TURN). Se tiver um servidor TURN seu,
    coloque-o em CUSTOM_TURN. Exemplo:
    const CUSTOM_TURN = [{ urls: 'turn:meu-servidor.com:3478', username: 'usuario', credential: 'senha' }];  */
+const APP_VERSION = '5';
 const CUSTOM_TURN = [];
 const PEER_OPTS = { config: { sdpSemantics: 'unified-plan', iceServers: [
   { urls: 'stun:stun.l.google.com:19302' },
@@ -349,7 +358,7 @@ const kill = p => { try { p._dead = true; p.destroy(); } catch (e) {} };
 /* =====================  ESTADO  ===================== */
 let peer = null;          // sua conexão com o servidor de encontro (id = sala + número da vaga)
 let myName, baseId, roomPass = '', leaving = false;
-let myId = null, mySlot = -1, joinedAt = 0, probeTimer = 0, searchTimer = 0, heirTimer = 0;
+let myId = null, mySlot = -1, joinedAt = 0, probeTimer = 0, searchTimer = 0, heirTimer = 0, statusTimer = 0;
 let myStream = null, myKind = null;
 const MAX_SLOTS = 12;      // máximo de pessoas por sala
 const conns = new Map();        // id -> DataConnection escolhida
@@ -420,13 +429,13 @@ function destroyTile(t) {
   t.el.remove();
 }
 function resetState() {
-  conns.clear(); dialing.clear(); calls.clear(); pendingCalls.clear(); people.clear();
+  ignoreUntil.clear(); conns.clear(); dialing.clear(); calls.clear(); pendingCalls.clear(); people.clear();
   tiles.forEach(destroyTile); tiles.clear();
   own = { id: null, epoch: 0 }; bans.clear(); bansName.clear(); hidden.clear();
   clearTimeout(heirTimer);
 }
 function closeAll() {
-  clearInterval(probeTimer); clearTimeout(searchTimer); clearTimeout(heirTimer);
+  clearInterval(probeTimer); clearInterval(statusTimer); clearTimeout(searchTimer); clearTimeout(heirTimer);
   const p = peer; peer = null; myId = null; mySlot = -1;
   try { p && p.destroy(); } catch (e) {}
 }
@@ -455,7 +464,9 @@ function claimSlot(i) {
     myId = id; mySlot = i;
     msgK('searching');
     probe();
+    setTimeout(probe, 2500); setTimeout(probe, 6000);
     probeTimer = setInterval(probe, 12000);
+    updateStatus();
     searchTimer = setTimeout(() => {
       if (!people.size) {
         // sozinho na sala: você é o primeiro, então vira o dono
@@ -502,22 +513,39 @@ function wake() {
 document.addEventListener('visibilitychange', () => { if (!document.hidden) wake(); });
 window.addEventListener('online', wake);
 
+function updateStatus() {
+  clearInterval(statusTimer);
+  const upd = () => {
+    const n = [...conns.values()].filter(c => c.verified).length;
+    const srv = !peer ? 'srvWait' : (peer.open && !peer.disconnected) ? 'srvOk' : peer.open ? 'srvOff' : 'srvWait';
+    $('status').textContent = T('statusLine', { srv: T(srv), slot: mySlot + 1, n, ver: APP_VERSION });
+  };
+  upd(); statusTimer = setInterval(upd, 2000);
+}
+
 function probe() {
   if (leaving || !peer || !peer.open || mySlot < 0) return;
   for (let i = 0; i < MAX_SLOTS; i++) if (i !== mySlot) dial(baseId + '_' + i);
 }
 
+const ignoreUntil = new Map();   // vagas que não responderam (fantasmas) ficam em espera
 function dial(id) {
   if (!id || !peer || !peer.open || id === myId || conns.has(id) || dialing.has(id)) return;
+  if ((ignoreUntil.get(id) || 0) > Date.now()) return;
   const c = peer.connect(id, { reliable: true });
   dialing.set(id, c);
   setupConn(c, true);
   setTimeout(() => {
-    if (dialing.get(id) === c) {
-      dialing.delete(id);
-      try { c.close(); } catch (e) {}
-      msgK('connFail');
-    }
+    if (dialing.get(id) !== c) return;
+    dialing.delete(id);
+    // "new" = ninguém respondeu (vaga fantasma de alguém que saiu): silêncio e tenta de novo mais tarde.
+    // Qualquer outro estado = a pessoa respondeu mas a rede não deixou fechar a conexão.
+    const st = c.peerConnection ? c.peerConnection.iceConnectionState : 'new';
+    try { c.close(); } catch (e) {}
+    if (st === 'new') { ignoreUntil.set(id, Date.now() + 45000); return; }
+    ignoreUntil.set(id, Date.now() + 6000);
+    msgK('connFail');
+    setTimeout(() => { if (msgKey() === 'connFail') msg(''); }, 12000);
   }, 20000);
 }
 
@@ -525,7 +553,7 @@ function dial(id) {
 function sendHello(c) {
   c.sentAge = myAge();
   c.send({ t: 'hello', name: myName, sharing: !!myStream, kind: myKind, age: c.sentAge, pass: roomPass, slot: mySlot,
-           cid: clientId, own: { id: own.id, epoch: own.epoch }, bans: [...bans], bn: [...bansName] });
+           ver: APP_VERSION, cid: clientId, own: { id: own.id, epoch: own.epoch }, bans: [...bans], bn: [...bansName] });
 }
 
 function setupConn(c, outbound) {
@@ -593,6 +621,10 @@ function onHello(c, d) {
     return;
   }
 
+  if (d.ver !== APP_VERSION) {
+    msgK('oldVersion', { name: d.name, ver: d.ver || '?' });
+    setTimeout(() => { if (msgKey() === 'oldVersion') msg(''); }, 15000);
+  }
   c.verified = true;
   people.set(c.peer, { name: d.name, sharing: !!d.sharing, kind: d.kind, cid: d.cid, slot: d.slot, since: performance.now() - theirs });
   (d.bans || []).forEach(x => bans.add(x));
@@ -1106,6 +1138,7 @@ function doRender() {
   $('grid').style.gridTemplateRows = 'repeat(' + rows + ', minmax(0, 1fr))';
 }
 
+$('verTxt').textContent = 'v' + APP_VERSION;
 applyLang();
 </script>
 </body>
