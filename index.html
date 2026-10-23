@@ -36,6 +36,7 @@
   .tile { position:relative; background:#000; border-radius:12px; overflow:hidden; min-height:0; min-width:0; }
   .tile video { position:absolute; inset:0; width:100%; height:100%; object-fit:contain; background:#000; }
   .note { position:absolute; inset:0; display:grid; place-items:center; color:var(--mut); font-size:.9rem; text-align:center; padding:12px; white-space:pre-line; }
+  .unmute { position:absolute; right:8px; bottom:8px; padding:6px 10px; font-size:.8rem; border-radius:8px; }
   .label { position:absolute; left:8px; bottom:8px; background:rgba(0,0,0,.65); color:#fff; padding:4px 10px; border-radius:8px; font-size:.8rem; font-weight:600; max-width:90%; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   #empty { color:var(--mut); display:grid; place-items:center; border:2px dashed #343942; border-radius:12px; }
   aside { background:var(--card); border-radius:12px; padding:12px; overflow:auto; min-height:0; }
@@ -157,8 +158,9 @@ const people = new Map();  // id -> {name, sharing, kind}
 const tiles = new Map();   // id -> tile
 const members = new Map(); // (só quem segura a sala) id -> nome
 
-const slug = s => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim()
-  .replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'sala';
+// "Sala 1", "sala-1" e "SALA1" viram a mesma sala (só letras e números contam)
+const slug = s => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
+  .replace(/[^a-z0-9]+/g, '') || 'sala';
 const msg = t => { $('msg').textContent = t || ''; };
 const msgText = () => $('msg').textContent || '';
 
@@ -211,7 +213,34 @@ function resetState() {
   conns.clear(); dialing.clear(); calls.clear(); people.clear(); members.clear();
   tiles.forEach(destroyTile); tiles.clear();
 }
+/* Mantém a sala "viva" no servidor mesmo com a aba em segundo plano
+   (navegadores atrasam os temporizadores de abas escondidas e o registro da sala expirava). */
+let keepWorker = null, keepTimer = 0;
+function keepAlive() {
+  [peer, lobby].forEach(p => {
+    if (!p || p.destroyed) return;
+    try {
+      if (p.disconnected) p.reconnect();
+      else if (p.socket) p.socket.send({ type: 'HEARTBEAT' });
+    } catch (e) {}
+  });
+}
+function startKeepAlive() {
+  stopKeepAlive();
+  try {
+    const url = URL.createObjectURL(new Blob(['setInterval(function(){postMessage(1)},8000)'], { type: 'text/javascript' }));
+    keepWorker = new Worker(url);
+    keepWorker.onmessage = keepAlive;
+  } catch (e) { keepWorker = null; keepTimer = setInterval(keepAlive, 8000); }
+}
+function stopKeepAlive() {
+  if (keepWorker) { try { keepWorker.terminate(); } catch (e) {} keepWorker = null; }
+  if (keepTimer) { clearInterval(keepTimer); keepTimer = 0; }
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden && peer) keepAlive(); });
+
 function closeAll() {
+  stopKeepAlive();
   lobbyTry = false; lobbyConn = null;
   const l = lobby, p = peer; lobby = null; peer = null;
   try { l && l.destroy(); } catch (e) {}
@@ -221,6 +250,7 @@ function closeAll() {
 function start() {
   closeAll(); resetState();
   leaving = false; denied = false;
+  startKeepAlive();
   // Sem opções extras: usa os servidores de rede padrão do PeerJS (inclui retransmissão para redes difíceis).
   const me = new Peer();
   peer = me;
@@ -300,16 +330,28 @@ function handleLobbyConn(c) {
 function joinLobby() {
   if (leaving || !peer || lobby) return;
   if (lobbyConn) { try { lobbyConn.close(); } catch (_) {} lobbyConn = null; }
+  if (!people.size && !msgText()) msg('Procurando a sala...');
   const c = peer.connect(hostId, { reliable: true });
   lobbyConn = c;
-  c.on('open', () => c.send({ t: 'join', id: peer.id, name: myName, pass: roomPass }));
+  // Se a porta da sala não responder (registro velho de alguém que saiu), tenta de novo em vez de ficar parado
+  const giveUp = setTimeout(() => {
+    if (lobbyConn === c && !c.open) { lobbyConn = null; try { c.close(); } catch (_) {} retryLobby(); }
+  }, 8000);
+  c.on('open', () => { clearTimeout(giveUp); c.send({ t: 'join', id: peer.id, name: myName, pass: roomPass }); });
   c.on('data', d => {
     if (d.t === 'peers') {
       msg(d.list.length ? 'Conectando com os participantes...' : 'Sala encontrada. Aguardando outras pessoas...');
       d.list.forEach(id => dial(id));
-    } else if (d.t === 'denied') { denied = true; kickOut(d.reason); }
+    } else if (d.t === 'denied') {
+      if (people.size > 0) {
+        // já estou numa sala ativa: não me expulso por causa de outra sala "gêmea"
+        msg('Existe outra sala com este nome com senha ou nome diferente. Você continua na sua.');
+        denied = true;
+        setTimeout(() => { denied = false; }, 30000);
+      } else { denied = true; kickOut(d.reason); }
+    }
   });
-  c.on('close', () => { if (lobbyConn === c) { lobbyConn = null; retryLobby(); } });
+  c.on('close', () => { clearTimeout(giveUp); if (lobbyConn === c) { lobbyConn = null; retryLobby(); } });
   c.on('error', () => {});
 }
 function retryLobby() {
@@ -326,14 +368,14 @@ function kickOut(reason) {
 }
 
 /* ---------- Conexões entre participantes ---------- */
-function dial(id) {
+function dial(id, quiet) {
   if (!id || !peer || id === peer.id || conns.has(id) || dialing.has(id)) return;
   dialing.add(id);
   setupConn(peer.connect(id, { reliable: true }));
   setTimeout(() => {
     if (dialing.has(id)) {
       dialing.delete(id);
-      msg('Não foi possível conectar com um participante (a rede dele pode estar restritiva).');
+      if (!quiet) msg('Não foi possível conectar com um participante (a rede dele pode estar restritiva).');
     }
   }, 15000);
 }
@@ -345,12 +387,16 @@ function setupConn(c) {
   c.on('open', () => {
     dialing.delete(c.peer);
     conns.set(c.peer, c);
-    c.send({ t: 'hello', name: myName, sharing: !!myStream, kind: myKind });
+    c.send({ t: 'hello', name: myName, sharing: !!myStream, kind: myKind, rp: roomPass, known: [...conns.keys()] });
     if (myStream) callPeer(c.peer);
   });
   c.on('data', d => {
     if (d.t === 'hello') {
+      // só aceita quem tem a mesma senha da sala
+      if ((d.rp || '') !== roomPass) { try { c.close(); } catch (_) {} return; }
       people.set(c.peer, { name: d.name, sharing: d.sharing, kind: d.kind });
+      // se houver gente que eu ainda não conheço (salas que se separaram), conecta com eles também
+      (d.known || []).forEach(id => dial(id, true));
       if (lobby) members.set(c.peer, d.name);
       if (msgText().startsWith('Conectando') || msgText().startsWith('Sala ')) msg('');
       render();
@@ -436,11 +482,8 @@ function scheduleQuality() {
 }
 
 /* ---------- Transmissão ---------- */
-// Economia: sem ninguém assistindo, a captura da tela fica pausada (câmera segue ligada para o preview).
 function syncCapture() {
   if (!myStream) return;
-  const vt = myStream.getVideoTracks()[0];
-  if (vt) { const want = myKind === 'cam' || calls.size > 0; if (vt.enabled !== want) vt.enabled = want; }
   updateLocalNote();
 }
 function updateLocalNote() {
@@ -451,7 +494,7 @@ function updateLocalNote() {
   const info = (s.width || '?') + '×' + (s.height || '?') + ' a ' + Math.round(s.frameRate || 0) + ' FPS';
   t.note.textContent = calls.size > 0
     ? 'Sua tela está sendo transmitida\n' + info
-    : 'Aguardando espectadores (envio pausado para economizar)\n' + info;
+    : 'Aguardando espectadores...\n' + info;
 }
 
 function callPeer(id) {
@@ -561,7 +604,7 @@ function showTile(id, stream, call, isLocal) {
     const video = document.createElement('video'); video.autoplay = true; video.playsInline = true;
     const label = document.createElement('div'); label.className = 'label';
     el.append(video);
-    t = { el, video, label, call: null, note: null, noPreview: false, timer: 0, fps: 0, res: '', lastFrames: 0, lastT: 0 };
+    t = { el, video, label, call: null, note: null, um: null, noPreview: false, timer: 0, fps: 0, res: '', lastFrames: 0, lastT: 0, created: performance.now() };
     // Ver a própria tela dentro da própria tela gera um "espelho infinito" e pesa; mostramos um aviso.
     if (isLocal && myKind === 'screen') {
       t.noPreview = true;
@@ -569,6 +612,13 @@ function showTile(id, stream, call, isLocal) {
       el.append(t.note);
     }
     el.append(label);
+    if (!isLocal) {
+      // Alguns navegadores (ex.: Brave) bloqueiam vídeo com som até um clique: oferecemos um botão
+      t.um = document.createElement('button'); t.um.className = 'unmute hidden';
+      t.um.textContent = 'Ativar som';
+      t.um.onclick = () => { t.video.muted = false; t.video.play().catch(() => {}); t.um.classList.add('hidden'); };
+      el.append(t.um);
+    }
     el.ondblclick = () => { if (document.fullscreenElement) document.exitFullscreen(); else el.requestFullscreen(); };
     $('grid').append(el);
     tiles.set(id, t);
@@ -589,7 +639,16 @@ function showTile(id, stream, call, isLocal) {
   t.video.muted = !!isLocal;
   if (!t.noPreview && t.video.srcObject !== stream) t.video.srcObject = stream;
   t.call = call;
-  if (!t.noPreview) t.video.play().catch(() => {});
+  if (!t.noPreview) {
+    const pr = t.video.play();
+    if (pr && pr.catch) pr.catch(() => {
+      if (isLocal) return;
+      // reprodução com som bloqueada: toca sem som para a imagem aparecer e oferece o botão
+      t.video.muted = true;
+      if (t.um) t.um.classList.remove('hidden');
+      t.video.play().catch(() => {});
+    });
+  }
   render();
 }
 function removeTile(id) {
@@ -631,6 +690,7 @@ function doRender() {
     if (id !== 'me') {
       if (t.res) text += ' · ' + t.res;
       if (t.fps) text += ' · ' + t.fps + ' fps';
+      if (!t.res && performance.now() - t.created > 6000) text += ' · sem imagem';
     }
     if (t.label.textContent !== text) t.label.textContent = text;
   });
