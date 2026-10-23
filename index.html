@@ -36,6 +36,7 @@
   .tile { position:relative; background:#000; border-radius:12px; overflow:hidden; min-height:0; min-width:0; }
   .tile video { position:absolute; inset:0; width:100%; height:100%; object-fit:contain; background:#000; }
   .note { position:absolute; inset:0; display:grid; place-items:center; color:var(--mut); font-size:.9rem; text-align:center; padding:12px; white-space:pre-line; }
+  .unmute { position:absolute; right:8px; bottom:8px; padding:6px 10px; font-size:.8rem; border-radius:8px; }
   .label { position:absolute; left:8px; bottom:8px; background:rgba(0,0,0,.65); color:#fff; padding:4px 10px; border-radius:8px; font-size:.8rem; font-weight:600; max-width:90%; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   #empty { color:var(--mut); display:grid; place-items:center; border:2px dashed #343942; border-radius:12px; }
   aside { background:var(--card); border-radius:12px; padding:12px; overflow:auto; min-height:0; }
@@ -90,6 +91,12 @@
   <div id="controls">
     <button id="btnScreen">Compartilhar tela</button>
     <button id="btnCam" class="sec">Ligar câmera</button>
+    <label class="mut">Câmera:
+      <select id="facing">
+        <option value="user" selected>Frontal</option>
+        <option value="environment">Traseira</option>
+      </select>
+    </label>
     <button id="btnStop" class="bad" disabled>Parar</button>
     <label class="mut">Fluidez:
       <select id="fps">
@@ -144,23 +151,25 @@ function loadPeer() {
 // Começa a baixar assim que a pessoa clica em qualquer campo (ganha tempo sem gastar à toa)
 $('join').addEventListener('focusin', () => loadPeer(), { once: true });
 
-let peer = null;          // seu "endereço" pessoal (id aleatório)
-let lobby = null;         // endereço fixo da sala, só existe em quem a "segura"
-let lobbyConn = null;     // conexão com quem segura a sala
-let lobbyTry = false;
-let myName, hostId, roomPass = '', leaving = false, denied = false;
+let peer = null;          // sua conexão com o servidor de encontro (id = sala + número da vaga)
+let myName, baseId, roomPass = '', leaving = false;
+let myId = null, mySlot = -1, joinedAt = 0, probeTimer = 0, searchTimer = 0;
 let myStream = null, myKind = null;
-const conns = new Map();   // id -> DataConnection
-const dialing = new Set(); // ids em conexão
-const calls = new Map();   // id -> MediaConnection (saída)
-const people = new Map();  // id -> {name, sharing, kind}
-const tiles = new Map();   // id -> tile
-const members = new Map(); // (só quem segura a sala) id -> nome
+const MAX_SLOTS = 12;      // máximo de pessoas por sala
+const conns = new Map();        // id -> DataConnection escolhida
+const dialing = new Map();      // id -> DataConnection ainda abrindo
+const calls = new Map();        // id -> MediaConnection (saída)
+const pendingCalls = new Map(); // id -> chamada recebida aguardando validação
+const people = new Map();       // id -> {name, sharing, kind}
+const tiles = new Map();        // id -> tile
 
 const slug = s => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim()
   .replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'sala';
 const msg = t => { $('msg').textContent = t || ''; };
 const msgText = () => $('msg').textContent || '';
+const slotOf = id => { const m = /_(\d+)$/.exec(id || ''); return m ? +m[1] : 999; };
+const norm = s => String(s || '').trim().toLowerCase();
+const myAge = () => performance.now() - joinedAt;
 
 /* ---------- Entrada na sala ---------- */
 async function hashPass(room, pass) {
@@ -193,7 +202,7 @@ $('btnJoin').onclick = async () => {
   }
   const rs = slug(room);
   myName = name;
-  hostId = 'sala-share-' + rs;
+  baseId = 'ss2-' + rs;
   roomPass = await hashPass(rs, $('inPass').value);
   $('btnJoin').disabled = false;
   $('roomName').textContent = room;
@@ -208,166 +217,193 @@ function destroyTile(t) {
   t.el.remove();
 }
 function resetState() {
-  conns.clear(); dialing.clear(); calls.clear(); people.clear(); members.clear();
+  conns.clear(); dialing.clear(); calls.clear(); pendingCalls.clear(); people.clear();
   tiles.forEach(destroyTile); tiles.clear();
 }
 function closeAll() {
-  lobbyTry = false; lobbyConn = null;
-  const l = lobby, p = peer; lobby = null; peer = null;
-  try { l && l.destroy(); } catch (e) {}
+  clearInterval(probeTimer); clearTimeout(searchTimer);
+  const p = peer; peer = null; myId = null; mySlot = -1;
   try { p && p.destroy(); } catch (e) {}
 }
 
+/* ---------- Encontrar a sala ----------
+   Cada pessoa ocupa uma "vaga" fixa da sala (ss2-nome_0, _1, _2...).
+   Para achar os outros, basta chamar todas as vagas: não existe "dono" da sala,
+   então duas pessoas nunca acabam em salas separadas. */
 function start() {
   closeAll(); resetState();
-  leaving = false; denied = false;
-  // Sem opções extras: usa os servidores de rede padrão do PeerJS (inclui retransmissão para redes difíceis).
-  const me = new Peer();
+  leaving = false;
+  joinedAt = performance.now();
+  claimSlot(0);
+}
+
+function claimSlot(i) {
+  if (leaving) return;
+  if (i >= MAX_SLOTS) { kickOut('full'); return; }
+  let opened = false;
+  const me = new Peer(baseId + '_' + i);
   peer = me;
 
-  me.on('open', () => {
-    me.on('connection', c => acceptConn(c));
-    me.on('call', call => {
-      call.answer(undefined, { sdpTransform: tuneSdp });
-      call.on('stream', s => showTile(call.peer, s, call));
-      call.on('close', () => { const t = tiles.get(call.peer); if (t && t.call === call) removeTile(call.peer); });
-    });
-    msg(''); render();
-    tryLobby();
+  me.on('open', id => {
+    if (me !== peer) return;
+    opened = true;
+    myId = id; mySlot = i;
+    msg('Procurando a sala...');
+    probe();
+    probeTimer = setInterval(probe, 12000);
+    searchTimer = setTimeout(() => {
+      if (!people.size && msgText().startsWith('Procurando')) msg('Sala criada. Aguardando outras pessoas...');
+    }, 5000);
+    render();
   });
+  me.on('connection', c => { if (me === peer) setupConn(c, false); });
+  me.on('call', call => { if (me === peer) onCall(call); });
 
   me.on('error', e => {
     if (me !== peer) return;
+    if (e.type === 'unavailable-id') {
+      try { me.destroy(); } catch (_) {}
+      if (!opened) claimSlot(i + 1);
+      else { msg('Reconectando à sala...'); setTimeout(() => { if (!leaving) start(); }, 500); }
+      return;
+    }
     if (e.type === 'peer-unavailable') {
-      const m = /peer (\S+)/.exec(String(e.message || ''));
-      if (m) dialing.delete(m[1]);
-      if (String(e.message).includes(hostId)) retryLobby();
+      const m = /peer (\S+)$/.exec(String(e.message || ''));
+      if (m) { const c = dialing.get(m[1]); dialing.delete(m[1]); if (c) { try { c.close(); } catch (_) {} } }
+      return;
+    }
+    if (!opened && ['network', 'server-error', 'socket-error', 'socket-closed'].includes(e.type)) {
+      msg('Servidor de conexão indisponível. Tentando de novo...');
+      try { me.destroy(); } catch (_) {}
+      setTimeout(() => claimSlot(i), 3000);
       return;
     }
     msg('Erro de conexão: ' + e.type);
   });
-  me.on('disconnected', () => { if (me === peer && !me.destroyed) { try { me.reconnect(); } catch (e) {} } });
+  me.on('disconnected', () => { if (me === peer && !me.destroyed && !leaving) { try { me.reconnect(); } catch (e) {} } });
 }
 
-/* ---------- "Porta de entrada" da sala (senha + nomes + lista de pessoas) ---------- */
-function tryLobby() {
-  if (lobby || lobbyTry || leaving || !peer) return;
-  lobbyTry = true;
-  const l = new Peer(hostId);
-  l.on('open', () => {
-    lobbyTry = false;
-    if (leaving || !peer) { try { l.destroy(); } catch (e) {} return; }
-    lobby = l;
-    members.clear();
-    members.set(peer.id, myName);
-    people.forEach((p, id) => members.set(id, p.name));
-    l.on('connection', handleLobbyConn);
-    if (!people.size) msg('Sala criada. Aguardando outras pessoas...');
+function probe() {
+  if (leaving || !peer || !peer.open || mySlot < 0) return;
+  for (let i = 0; i < MAX_SLOTS; i++) if (i !== mySlot) dial(baseId + '_' + i);
+}
+
+function dial(id) {
+  if (!id || !peer || !peer.open || id === myId || conns.has(id) || dialing.has(id)) return;
+  const c = peer.connect(id, { reliable: true });
+  dialing.set(id, c);
+  setupConn(c, true);
+  setTimeout(() => {
+    if (dialing.get(id) === c) {
+      dialing.delete(id);
+      try { c.close(); } catch (e) {}
+      msg('Não foi possível conectar com um participante (a rede dele pode estar restritiva).');
+    }
+  }, 20000);
+}
+
+/* ---------- Conexões entre participantes ---------- */
+function sendHello(c) {
+  c.sentAge = myAge();
+  c.send({ t: 'hello', name: myName, sharing: !!myStream, kind: myKind, age: c.sentAge, pass: roomPass, slot: mySlot });
+}
+
+function setupConn(c, outbound) {
+  const id = c.peer;
+  c.on('open', () => {
+    if (dialing.get(id) === c) dialing.delete(id);
+    // Se duas conexões abrirem ao mesmo tempo, as duas pontas ficam com a mesma:
+    // a iniciada pela pessoa de vaga maior.
+    const dialerSlot = outbound ? mySlot : slotOf(id);
+    const otherSlot = outbound ? slotOf(id) : mySlot;
+    c.rank = dialerSlot > otherSlot;
+    const old = conns.get(id);
+    if (old && old !== c && old.open) {
+      if (old.rank && !c.rank) { c.replaced = true; try { c.close(); } catch (e) {} return; }
+      old.replaced = true; try { old.close(); } catch (e) {}
+    }
+    conns.set(id, c);
+    sendHello(c);
   });
-  l.on('error', e => {
-    if (e.type === 'unavailable-id') {
-      lobbyTry = false;
-      try { l.destroy(); } catch (_) {}
-      joinLobby();
-    } else if (e.type !== 'peer-unavailable') {
-      lobbyTry = false;
-      msg('Erro na sala: ' + e.type);
+  c.on('data', d => {
+    if (!d || c.replaced) return;
+    if (d.t === 'hello') return onHello(c, d);
+    if (d.t === 'denied') { if (!c.verified) kickOut(d.reason); return; }
+    if (!c.verified) return;
+    if (d.t === 'sharing') {
+      const p = people.get(id);
+      if (p) { p.sharing = d.on; p.kind = d.kind; render(); }
     }
   });
-  l.on('disconnected', () => { if (lobby === l && !l.destroyed) { try { l.reconnect(); } catch (_) {} } });
-  l.on('close', () => {
-    if (lobby === l) { lobby = null; members.clear(); if (!leaving) setTimeout(tryLobby, 600); }
-  });
+  const gone = () => {
+    if (dialing.get(id) === c) dialing.delete(id);
+    if (c.replaced) return;
+    if (conns.get(id) === c) drop(id);
+  };
+  c.on('close', gone);
+  c.on('error', gone);
 }
 
-function handleLobbyConn(c) {
-  c.on('data', d => {
-    if (!d || d.t !== 'join') return;
-    const deny = reason => {
-      c.send({ t: 'denied', reason });
-      setTimeout(() => { try { c.close(); } catch (_) {} }, 600);
-    };
-    if ((d.pass || '') !== roomPass) return deny(roomPass ? (d.pass ? 'wrong' : 'required') : 'open');
-    const norm = s => String(s || '').trim().toLowerCase();
-    if ([...members.entries()].some(([id, n]) => id !== d.id && norm(n) === norm(d.name))) return deny('name');
-    c.memberId = d.id;
-    c.send({ t: 'peers', list: [...members.keys()].filter(id => id !== d.id) });
-    members.set(d.id, d.name);
-  });
-  c.on('close', () => { if (c.memberId) members.delete(c.memberId); });
+// Valida senha e nome de quem acabou de conectar. Em caso de conflito vale a pessoa
+// que está na sala há mais tempo; a outra é recusada.
+function onHello(c, d) {
+  const theirPass = d.pass || '';
+  let reason = null;
+  if (theirPass !== roomPass) reason = !roomPass ? 'required' : !theirPass ? 'open' : 'wrong';
+  else if (norm(d.name) === norm(myName)) reason = 'name';
+
+  if (reason) {
+    const mine = c.sentAge != null ? c.sentAge : myAge();
+    const theirs = +d.age || 0;
+    const theyAreOlder = theirs > mine || (theirs === mine && slotOf(c.peer) < mySlot);
+    if (theyAreOlder) { kickOut(reason); }
+    else {
+      try { c.send({ t: 'denied', reason }); } catch (e) {}
+      setTimeout(() => { try { c.close(); } catch (e) {} }, 500);
+    }
+    return;
+  }
+
+  c.verified = true;
+  people.set(c.peer, { name: d.name, sharing: !!d.sharing, kind: d.kind });
+  const m = msgText();
+  if (m.startsWith('Procurando') || m.startsWith('Sala ') || m.startsWith('Conectando')) msg('');
+  const pc = pendingCalls.get(c.peer);
+  if (pc) { pendingCalls.delete(c.peer); answerCall(pc); }
+  if (myStream) callPeer(c.peer);
+  render();
 }
 
-function joinLobby() {
-  if (leaving || !peer || lobby) return;
-  if (lobbyConn) { try { lobbyConn.close(); } catch (_) {} lobbyConn = null; }
-  const c = peer.connect(hostId, { reliable: true });
-  lobbyConn = c;
-  c.on('open', () => c.send({ t: 'join', id: peer.id, name: myName, pass: roomPass }));
-  c.on('data', d => {
-    if (d.t === 'peers') {
-      msg(d.list.length ? 'Conectando com os participantes...' : 'Sala encontrada. Aguardando outras pessoas...');
-      d.list.forEach(id => dial(id));
-    } else if (d.t === 'denied') { denied = true; kickOut(d.reason); }
-  });
-  c.on('close', () => { if (lobbyConn === c) { lobbyConn = null; retryLobby(); } });
-  c.on('error', () => {});
-}
-function retryLobby() {
-  if (leaving || denied) return;
-  setTimeout(() => { lobbyConn = null; tryLobby(); }, 400 + Math.random() * 1200);
-}
 function kickOut(reason) {
   const text = reason === 'name' ? 'Já existe alguém com esse nome nesta sala. Escolha outro nome (ou aguarde alguns segundos se você acabou de recarregar a página).'
     : reason === 'required' ? 'Esta sala exige senha. Digite a senha para entrar.'
     : reason === 'open' ? 'Esta sala não usa senha. Deixe o campo de senha vazio.'
+    : reason === 'full' ? 'Esta sala está cheia (máximo de ' + MAX_SLOTS + ' pessoas).'
     : 'Senha incorreta.';
   leaveRoom();
   $('joinErr').textContent = text;
 }
 
-/* ---------- Conexões entre participantes ---------- */
-function dial(id) {
-  if (!id || !peer || id === peer.id || conns.has(id) || dialing.has(id)) return;
-  dialing.add(id);
-  setupConn(peer.connect(id, { reliable: true }));
-  setTimeout(() => {
-    if (dialing.has(id)) {
-      dialing.delete(id);
-      msg('Não foi possível conectar com um participante (a rede dele pode estar restritiva).');
-    }
-  }, 15000);
-}
-function acceptConn(c) {
-  if (conns.has(c.peer)) { c.close(); return; }
-  setupConn(c);
-}
-function setupConn(c) {
-  c.on('open', () => {
-    dialing.delete(c.peer);
-    conns.set(c.peer, c);
-    c.send({ t: 'hello', name: myName, sharing: !!myStream, kind: myKind });
-    if (myStream) callPeer(c.peer);
-  });
-  c.on('data', d => {
-    if (d.t === 'hello') {
-      people.set(c.peer, { name: d.name, sharing: d.sharing, kind: d.kind });
-      if (lobby) members.set(c.peer, d.name);
-      if (msgText().startsWith('Conectando') || msgText().startsWith('Sala ')) msg('');
-      render();
-    } else if (d.t === 'sharing') {
-      const p = people.get(c.peer);
-      if (p) { p.sharing = d.on; p.kind = d.kind; render(); }
-    }
-  });
-  const gone = () => { dialing.delete(c.peer); if (conns.get(c.peer) === c || !conns.has(c.peer)) drop(c.peer); };
-  c.on('close', gone);
-  c.on('error', gone);
-}
-function broadcast(m) { conns.forEach(c => { try { c.send(m); } catch (e) {} }); }
+function broadcast(m) { conns.forEach(c => { if (c.verified) { try { c.send(m); } catch (e) {} } }); }
 function drop(id) {
-  conns.delete(id); people.delete(id); members.delete(id);
+  conns.delete(id); people.delete(id); pendingCalls.delete(id);
   const c = calls.get(id); if (c) c.close(); calls.delete(id);
   removeTile(id); render();
+}
+
+/* ---------- Receber vídeo (só de quem já foi validado) ---------- */
+function onCall(call) {
+  const c = conns.get(call.peer);
+  if (c && c.verified) { answerCall(call); return; }
+  pendingCalls.set(call.peer, call);
+  setTimeout(() => {
+    if (pendingCalls.get(call.peer) === call) { pendingCalls.delete(call.peer); try { call.close(); } catch (e) {} }
+  }, 10000);
+}
+function answerCall(call) {
+  call.answer(undefined, { sdpTransform: tuneSdp });
+  call.on('stream', s => showTile(call.peer, s, call));
+  call.on('close', () => { const t = tiles.get(call.peer); if (t && t.call === call) removeTile(call.peer); });
 }
 
 /* ---------- Qualidade de vídeo ---------- */
@@ -436,11 +472,8 @@ function scheduleQuality() {
 }
 
 /* ---------- Transmissão ---------- */
-// Economia: sem ninguém assistindo, a captura da tela fica pausada (câmera segue ligada para o preview).
 function syncCapture() {
   if (!myStream) return;
-  const vt = myStream.getVideoTracks()[0];
-  if (vt) { const want = myKind === 'cam' || calls.size > 0; if (vt.enabled !== want) vt.enabled = want; }
   updateLocalNote();
 }
 function updateLocalNote() {
@@ -450,8 +483,8 @@ function updateLocalNote() {
   const s = vt.getSettings ? vt.getSettings() : {};
   const info = (s.width || '?') + '×' + (s.height || '?') + ' a ' + Math.round(s.frameRate || 0) + ' FPS';
   t.note.textContent = calls.size > 0
-    ? 'Sua tela está sendo transmitida\n' + info
-    : 'Aguardando espectadores (envio pausado para economizar)\n' + info;
+    ? 'Sua tela está sendo transmitida para ' + calls.size + (calls.size === 1 ? ' pessoa' : ' pessoas') + '\n' + info
+    : 'Sua tela está pronta, ninguém assistindo ainda\n' + info;
 }
 
 function callPeer(id) {
@@ -465,7 +498,25 @@ function callPeer(id) {
   scheduleQuality();
 }
 
+// Celulares (Android e iPhone) não permitem compartilhar tela pelo navegador: é uma limitação deles.
+const canShareScreen = !!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia);
+const canUseCamera = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+if (!canShareScreen) {
+  $('btnScreen').disabled = true;
+  $('btnScreen').title = 'Este navegador não permite compartilhar a tela. Use um computador (Chrome, Edge ou Firefox).';
+}
+$('facing').onchange = () => { if (myKind === 'cam') share('cam'); };
+if (!canShareScreen) $('btnScreen').textContent = 'Tela indisponível neste aparelho';
+
 async function share(kind) {
+  if (kind === 'screen' && !canShareScreen) {
+    msg('Este aparelho/navegador não permite compartilhar a tela. Use um computador, ou ligue a câmera.');
+    return;
+  }
+  if (kind === 'cam' && !canUseCamera) {
+    msg('A câmera só funciona em páginas seguras (https). Abra o endereço https do site.');
+    return;
+  }
   if (myStream) stopShare();
   const q = qualitySettings();
   const frameRate = { ideal: q.fps, max: q.fps };
@@ -476,7 +527,7 @@ async function share(kind) {
         audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
       });
     } else {
-      const video = { frameRate, width: { ideal: q.w }, height: { ideal: q.h } };
+      const video = { frameRate, width: { ideal: q.w }, height: { ideal: q.h }, facingMode: { ideal: $('facing').value } };
       try { myStream = await navigator.mediaDevices.getUserMedia({ video, audio: true }); }
       catch (e) { myStream = await navigator.mediaDevices.getUserMedia({ video }); }
     }
@@ -487,7 +538,7 @@ async function share(kind) {
   vt.contentHint = kind === 'screen' ? (q.fps >= 60 ? 'motion' : 'detail') : 'motion';
   vt.onended = () => stopShare();
   showTile('me', myStream, null, true);
-  conns.forEach((_, id) => callPeer(id));
+  conns.forEach((c, id) => { if (c.verified) callPeer(id); });
   broadcast({ t: 'sharing', on: true, kind });
   syncCapture();
   updateButtons(); render();
@@ -549,7 +600,8 @@ window.addEventListener('beforeunload', () => { leaving = true; closeAll(); });
 
 function updateButtons() {
   $('btnStop').disabled = !myStream;
-  $('btnScreen').textContent = myKind === 'screen' ? 'Reiniciar tela' : 'Compartilhar tela';
+  $('btnScreen').textContent = !canShareScreen ? 'Tela indisponível neste aparelho'
+    : myKind === 'screen' ? 'Reiniciar tela' : 'Compartilhar tela';
   $('btnCam').textContent = myKind === 'cam' ? 'Reiniciar câmera' : 'Ligar câmera';
 }
 
@@ -561,7 +613,7 @@ function showTile(id, stream, call, isLocal) {
     const video = document.createElement('video'); video.autoplay = true; video.playsInline = true;
     const label = document.createElement('div'); label.className = 'label';
     el.append(video);
-    t = { el, video, label, call: null, note: null, noPreview: false, timer: 0, fps: 0, res: '', lastFrames: 0, lastT: 0 };
+    t = { el, video, label, call: null, note: null, um: null, noPreview: false, timer: 0, fps: 0, res: '', lastFrames: 0, lastT: 0, created: performance.now() };
     // Ver a própria tela dentro da própria tela gera um "espelho infinito" e pesa; mostramos um aviso.
     if (isLocal && myKind === 'screen') {
       t.noPreview = true;
@@ -569,6 +621,20 @@ function showTile(id, stream, call, isLocal) {
       el.append(t.note);
     }
     el.append(label);
+    if (!isLocal) {
+      // Aviso se a imagem demorar a aparecer (tela preta): clicar na tela força a reprodução
+      t.note = document.createElement('div'); t.note.className = 'note hidden';
+      t.note.style.pointerEvents = 'none';
+      el.append(t.note);
+      el.onclick = () => { t.video.play().catch(() => {}); };
+    }
+    if (!isLocal) {
+      // Alguns navegadores (ex.: Brave) bloqueiam vídeo com som até um clique: oferecemos um botão
+      t.um = document.createElement('button'); t.um.className = 'unmute hidden';
+      t.um.textContent = 'Ativar som';
+      t.um.onclick = () => { t.video.muted = false; t.video.play().catch(() => {}); t.um.classList.add('hidden'); };
+      el.append(t.um);
+    }
     el.ondblclick = () => { if (document.fullscreenElement) document.exitFullscreen(); else el.requestFullscreen(); };
     $('grid').append(el);
     tiles.set(id, t);
@@ -582,6 +648,14 @@ function showTile(id, stream, call, isLocal) {
         if (q) { t.fps = Math.round((q.totalVideoFrames - t.lastFrames) * 1000 / (now - t.lastT)); t.lastFrames = q.totalVideoFrames; }
         t.lastT = now;
         t.res = v.videoWidth ? v.videoWidth + '×' + v.videoHeight : '';
+        if (t.note) {
+          const stuck = !v.videoWidth || v.paused;
+          const waited = now - t.created > 4000;
+          t.note.textContent = v.paused && v.videoWidth ? 'Vídeo pausado pelo navegador.\nClique aqui para reproduzir.'
+            : 'Carregando a imagem...\nSe continuar preto, clique aqui.';
+          t.note.classList.toggle('hidden', !(stuck && waited));
+          if (v.paused && v.videoWidth) v.play().catch(() => {});
+        }
         render();
       }, 2000);
     }
@@ -589,7 +663,16 @@ function showTile(id, stream, call, isLocal) {
   t.video.muted = !!isLocal;
   if (!t.noPreview && t.video.srcObject !== stream) t.video.srcObject = stream;
   t.call = call;
-  if (!t.noPreview) t.video.play().catch(() => {});
+  if (!t.noPreview) {
+    const pr = t.video.play();
+    if (pr && pr.catch) pr.catch(() => {
+      if (isLocal) return;
+      // reprodução com som bloqueada: toca sem som para a imagem aparecer e oferece o botão
+      t.video.muted = true;
+      if (t.um) t.um.classList.remove('hidden');
+      t.video.play().catch(() => {});
+    });
+  }
   render();
 }
 function removeTile(id) {
@@ -631,6 +714,7 @@ function doRender() {
     if (id !== 'me') {
       if (t.res) text += ' · ' + t.res;
       if (t.fps) text += ' · ' + t.fps + ' fps';
+      if (!t.res && performance.now() - t.created > 6000) text += ' · sem imagem';
     }
     if (t.label.textContent !== text) t.label.textContent = text;
   });
