@@ -40,6 +40,7 @@
   .tbtn { position:absolute; padding:5px 9px; font-size:.78rem; border-radius:8px; background:rgba(0,0,0,.65); }
   .tbtn.snd { right:8px; bottom:8px; }
   .tbtn.hide { right:8px; top:8px; }
+  .tvol { position:absolute; left:8px; top:12px; width:90px; padding:0; background:transparent; border:0; opacity:.85; }
   .label { position:absolute; left:8px; bottom:8px; background:rgba(0,0,0,.65); color:#fff; padding:4px 10px; border-radius:8px; font-size:.8rem; font-weight:600; max-width:calc(100% - 150px); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   #empty { color:var(--mut); display:grid; place-items:center; text-align:center; padding:12px; border:2px dashed #343942; border-radius:12px; }
   aside { background:var(--card); border-radius:12px; padding:12px; overflow:auto; min-height:0; }
@@ -105,7 +106,6 @@
   <div id="controls">
     <button id="btnScreen"></button>
     <button id="btnCam" class="sec"></button>
-    <button id="btnMic" class="sec"></button>
     <label class="mut"><span data-i18n="lblCam"></span>
       <select id="facing">
         <option value="user" data-i18n="camFront" selected></option>
@@ -130,6 +130,7 @@
         <option value="2160" data-i18n="res2160"></option>
       </select>
     </label>
+    <label class="mut"><span data-i18n="lblVol"></span> <input id="vol" type="range" min="0" max="100" value="100" style="width:90px;padding:0;vertical-align:middle"></label>
     <span class="sp"></span>
     <button id="btnLeave" class="sec" data-i18n="btnLeave"></button>
   </div>
@@ -153,7 +154,7 @@ const I18N = {
   btnScreen:'Compartilhar tela', btnScreenRe:'Reiniciar tela', btnScreenNA:'Tela indisponível neste aparelho',
   btnCam:'Ligar câmera', btnCamRe:'Reiniciar câmera', lblCam:'Câmera:', camFront:'Frontal', camBack:'Traseira',
   btnStop:'Parar', lblFps:'Fluidez:', lblRes:'Resolução:', res720:'720p (leve)', res1080:'1080p (Full HD)', res1440:'1440p (2K)', res2160:'2160p (4K)',
-  btnLeave:'Sair da sala', micOn:'🎙 Microfone: ligado', micOff:'🎙 Microfone: desligado', micNA:'Microfone indisponível',
+  btnLeave:'Sair da sala', lblVol:'Volume:', volTile:'Volume desta transmissão',
   you:'você', owner:'Dono da sala', kick:'Expulsar', ban:'Banir', makeOwner:'Passar posse',
   hideScreen:'Ocultar tela', showScreen:'Mostrar tela', hideBtn:'Ocultar', soundOn:'Ativar som', soundOff:'Silenciar',
   confirmKick:'Expulsar {name} da sala? A pessoa poderá entrar de novo.',
@@ -172,9 +173,9 @@ const I18N = {
   cantCam:'A câmera só funciona em páginas seguras (https). Abra o endereço https do site.',
   startFail:'Não foi possível iniciar: {e}',
   noSysAudio:'Sem o som do computador: na janela do navegador, escolha "Tela inteira" ou uma "Aba" e marque "Compartilhar áudio".',
-  micDenied:'Microfone bloqueado ou indisponível: a transmissão segue sem a sua voz.',
+  camNoAudio:'Sem permissão de áudio: a câmera segue sem som.',
   qualityHigh:'Qualidade alta: exige computador e internet (envio) fortes. Se travar, reduza.',
-  audBoth:'áudio: computador + microfone', audSys:'áudio: som do computador', audMic:'áudio: microfone', audMicOff:'microfone desligado', audNone:'sem áudio',
+  audOn:'com áudio', audNone:'sem áudio',
   sharing1:'Sua tela está sendo transmitida para 1 pessoa', sharingN:'Sua tela está sendo transmitida para {n} pessoas',
   sharingReady:'Sua tela está pronta, ninguém assistindo ainda',
   loadingImg:'Carregando a imagem...\nSe continuar preto, clique aqui.', pausedImg:'Vídeo pausado pelo navegador.\nClique aqui para reproduzir.'
@@ -192,7 +193,7 @@ const I18N = {
   btnScreen:'Share screen', btnScreenRe:'Restart screen', btnScreenNA:'Screen sharing unavailable on this device',
   btnCam:'Turn on camera', btnCamRe:'Restart camera', lblCam:'Camera:', camFront:'Front', camBack:'Rear',
   btnStop:'Stop', lblFps:'Smoothness:', lblRes:'Resolution:', res720:'720p (light)', res1080:'1080p (Full HD)', res1440:'1440p (2K)', res2160:'2160p (4K)',
-  btnLeave:'Leave room', micOn:'🎙 Microphone: on', micOff:'🎙 Microphone: off', micNA:'Microphone unavailable',
+  btnLeave:'Leave room', lblVol:'Volume:', volTile:'Volume of this stream',
   you:'you', owner:'Room owner', kick:'Kick', ban:'Ban', makeOwner:'Make owner',
   hideScreen:'Hide screen', showScreen:'Show screen', hideBtn:'Hide', soundOn:'Turn sound on', soundOff:'Mute',
   confirmKick:'Kick {name} from the room? They will be able to join again.',
@@ -211,9 +212,9 @@ const I18N = {
   cantCam:'The camera only works on secure pages (https). Open the site\'s https address.',
   startFail:'Could not start: {e}',
   noSysAudio:'No computer sound: in the browser window, choose "Entire screen" or a "Tab" and tick "Share audio".',
-  micDenied:'Microphone blocked or unavailable: the stream continues without your voice.',
+  camNoAudio:'No audio permission: the camera continues without sound.',
   qualityHigh:'High quality needs a strong computer and upload speed. If it stutters, lower it.',
-  audBoth:'audio: computer + microphone', audSys:'audio: computer sound', audMic:'audio: microphone', audMicOff:'microphone off', audNone:'no audio',
+  audOn:'with audio', audNone:'no audio',
   sharing1:'Your screen is being shared with 1 person', sharingN:'Your screen is being shared with {n} people',
   sharingReady:'Your screen is ready, nobody is watching yet',
   loadingImg:'Loading the picture...\nIf it stays black, click here.', pausedImg:'Video paused by the browser.\nClick here to play.'
@@ -231,7 +232,7 @@ const I18N = {
   btnScreen:'Partilhar ecrã', btnScreenRe:'Reiniciar ecrã', btnScreenNA:'Ecrã indisponível neste dispositivo',
   btnCam:'Ligar câmara', btnCamRe:'Reiniciar câmara', lblCam:'Câmara:', camFront:'Frontal', camBack:'Traseira',
   btnStop:'Parar', lblFps:'Fluidez:', lblRes:'Resolução:', res720:'720p (leve)', res1080:'1080p (Full HD)', res1440:'1440p (2K)', res2160:'2160p (4K)',
-  btnLeave:'Sair da sala', micOn:'🎙 Microfone: ligado', micOff:'🎙 Microfone: desligado', micNA:'Microfone indisponível',
+  btnLeave:'Sair da sala', lblVol:'Volume:', volTile:'Volume desta transmissão',
   you:'você', owner:'Dono da sala', kick:'Expulsar', ban:'Banir', makeOwner:'Passar posse',
   hideScreen:'Ocultar ecrã', showScreen:'Mostrar ecrã', hideBtn:'Ocultar', soundOn:'Ativar som', soundOff:'Silenciar',
   confirmKick:'Expulsar {name} da sala? A pessoa poderá entrar novamente.',
@@ -250,9 +251,9 @@ const I18N = {
   cantCam:'A câmara só funciona em páginas seguras (https). Abra o endereço https do site.',
   startFail:'Não foi possível iniciar: {e}',
   noSysAudio:'Sem o som do computador: na janela do navegador, escolha "Ecrã inteiro" ou um "Separador" e marque "Partilhar áudio".',
-  micDenied:'Microfone bloqueado ou indisponível: a transmissão continua sem a sua voz.',
+  camNoAudio:'Sem permissão de áudio: a câmara continua sem som.',
   qualityHigh:'Qualidade alta: exige um computador e uma internet (envio) fortes. Se encravar, reduza.',
-  audBoth:'áudio: computador + microfone', audSys:'áudio: som do computador', audMic:'áudio: microfone', audMicOff:'microfone desligado', audNone:'sem áudio',
+  audOn:'com áudio', audNone:'sem áudio',
   sharing1:'O seu ecrã está a ser transmitido para 1 pessoa', sharingN:'O seu ecrã está a ser transmitido para {n} pessoas',
   sharingReady:'O seu ecrã está pronto, ainda ninguém a ver',
   loadingImg:'A carregar a imagem...\nSe continuar preto, clique aqui.', pausedImg:'Vídeo pausado pelo navegador.\nClique aqui para reproduzir.'
@@ -327,6 +328,23 @@ function loadPeer() {
 }
 // Começa a baixar assim que a pessoa clica em qualquer campo (ganha tempo sem gastar à toa)
 $('join').addEventListener('focusin', () => loadPeer(), { once: true });
+
+/* =====================  REDE (celular x computador)  =====================
+   Celulares em 4G/5G ficam atrás de redes que bloqueiam a conexão direta; nesses casos o
+   vídeo passa por um servidor de retransmissão (TURN). Se tiver um servidor TURN seu,
+   coloque-o em CUSTOM_TURN. Exemplo:
+   const CUSTOM_TURN = [{ urls: 'turn:meu-servidor.com:3478', username: 'usuario', credential: 'senha' }];  */
+const CUSTOM_TURN = [];
+const PEER_OPTS = { config: { sdpSemantics: 'unified-plan', iceServers: [
+  { urls: 'stun:stun.l.google.com:19302' },
+  { urls: 'stun:stun1.l.google.com:19302' },
+  { urls: 'stun:global.stun.twilio.com:3478' },
+  { urls: ['turn:eu-0.turn.peerjs.com:3478', 'turn:us-0.turn.peerjs.com:3478'], username: 'peerjs', credential: 'peerjsp' },
+  { urls: ['turn:openrelay.metered.ca:80', 'turn:openrelay.metered.ca:443', 'turn:openrelay.metered.ca:443?transport=tcp'], username: 'openrelayproject', credential: 'openrelayproject' }
+].concat(CUSTOM_TURN) } };
+// Ajustes de SDP "x-google-*" só existem no Chrome/Edge/Brave; Safari e Firefox (inclusive no iPhone) ficam sem mexer.
+const IS_CHROMIUM = /Chrome\/|Chromium\/|Edg\//.test(navigator.userAgent) && !/CriOS|FxiOS|iPhone|iPad|iPod/.test(navigator.userAgent);
+const kill = p => { try { p._dead = true; p.destroy(); } catch (e) {} };
 
 /* =====================  ESTADO  ===================== */
 let peer = null;          // sua conexão com o servidor de encontro (id = sala + número da vaga)
@@ -428,7 +446,7 @@ function claimSlot(i) {
   if (leaving) return;
   if (i >= MAX_SLOTS) { kickOut('full'); return; }
   let opened = false;
-  const me = new Peer(baseId + '_' + i);
+  const me = new Peer(baseId + '_' + i, PEER_OPTS);
   peer = me;
 
   me.on('open', id => {
@@ -453,7 +471,7 @@ function claimSlot(i) {
   me.on('error', e => {
     if (me !== peer) return;
     if (e.type === 'unavailable-id') {
-      try { me.destroy(); } catch (_) {}
+      kill(me);
       if (!opened) claimSlot(i + 1);
       else { msgK('reconnecting'); setTimeout(() => { if (!leaving) start(); }, 500); }
       return;
@@ -465,14 +483,24 @@ function claimSlot(i) {
     }
     if (!opened && ['network', 'server-error', 'socket-error', 'socket-closed'].includes(e.type)) {
       msgK('serverDown');
-      try { me.destroy(); } catch (_) {}
+      kill(me);
       setTimeout(() => claimSlot(i), 3000);
       return;
     }
     msgK('errConn', { e: e.type });
   });
   me.on('disconnected', () => { if (me === peer && !me.destroyed && !leaving) { try { me.reconnect(); } catch (e) {} } });
+  me.on('close', () => { if (me === peer && !me._dead && !leaving) { msgK('reconnecting'); setTimeout(() => { if (!leaving) start(); }, 800); } });
 }
+
+// Celular volta do bloqueio de tela / troca de rede: religa ao servidor e procura as pessoas de novo
+function wake() {
+  if (leaving || !peer) return;
+  try { if (peer.disconnected && !peer.destroyed) peer.reconnect(); } catch (e) {}
+  setTimeout(probe, 800);
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden) wake(); });
+window.addEventListener('online', wake);
 
 function probe() {
   if (leaving || !peer || !peer.open || mySlot < 0) return;
@@ -549,6 +577,7 @@ function onHello(c, d) {
     try { c.send({ t: 'denied', reason }); } catch (e) {}
     setTimeout(() => { try { c.close(); } catch (e) {} }, 500);
   };
+  if ((d.bans || []).includes(clientId) || (d.bn || []).includes(norm(myName))) { kickOut('banned'); return; }
   if (bans.has(d.cid) || bansName.has(norm(d.name))) return refuse('banned');
 
   const theirPass = d.pass || '';
@@ -685,6 +714,7 @@ function qualitySettings() {
 
 // Faz o codificador começar já em boa qualidade (sem a fase "borrada" inicial).
 function tuneSdp(sdp) {
+  if (!IS_CHROMIUM) return sdp;
   try {
     const lines = sdp.split('\r\n');
     const pts = new Set(), withFmtp = new Set();
@@ -741,27 +771,8 @@ function scheduleQuality() {
 const canShareScreen = !!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia);
 const canUseCamera = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
 
-let micOn = true;                 // microfone ligado/desligado (vale na hora, sem reiniciar)
-let micTrack = null, sysTrack = null, micGain = null, audioCtx = null;
-
-function applyMic() {
-  if (micGain) micGain.gain.value = micOn ? 1 : 0;
-  else if (micTrack) micTrack.enabled = micOn;
-}
-async function getMicTrack() {
-  if (!canUseCamera) return null;
-  try {
-    const s = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
-    return s.getAudioTracks()[0] || null;
-  } catch (e) { return null; }
-}
-function audioKey() {
-  if (sysTrack && micTrack) return micOn ? 'audBoth' : 'audSys';
-  if (sysTrack) return 'audSys';
-  if (micTrack) return micOn ? 'audMic' : 'audMicOff';
-  return 'audNone';
-}
-$('btnMic').onclick = () => { micOn = !micOn; applyMic(); updateButtons(); updateLocalNote(); render(); };
+let hasAudio = false;      // a transmissão atual tem faixa de áudio?
+function audioKey() { return hasAudio ? 'audOn' : 'audNone'; }
 
 function updateLocalNote() {
   const t = tiles.get('me');
@@ -795,7 +806,7 @@ async function share(kind) {
   if (myStream) stopShare();
   const q = qualitySettings();
   const frameRate = { ideal: q.fps, max: q.fps };
-  let stream;
+  let stream, camAudioFailed = false;
   try {
     if (kind === 'screen') {
       stream = await navigator.mediaDevices.getDisplayMedia({
@@ -804,40 +815,18 @@ async function share(kind) {
         systemAudio: 'include'
       });
     } else {
-      stream = await navigator.mediaDevices.getUserMedia({
-        video: { frameRate, width: { ideal: q.w }, height: { ideal: q.h }, facingMode: { ideal: $('facing').value } }
-      });
+      const video = { frameRate, width: { ideal: q.w }, height: { ideal: q.h }, facingMode: { ideal: $('facing').value } };
+      try { stream = await navigator.mediaDevices.getUserMedia({ video, audio: true }); }
+      catch (e) { camAudioFailed = true; stream = await navigator.mediaDevices.getUserMedia({ video }); }
     }
   } catch (e) { msgK('startFail', { e: e.message }); return; }
-
-  // Áudio: som do computador (se o navegador liberou) + microfone, misturados numa faixa só.
-  const sys = stream.getAudioTracks()[0] || null;
-  const mic = await getMicTrack();
-  sysTrack = sys; micTrack = mic; micGain = null;
-  if (sys && mic) {
-    try {
-      const AC = window.AudioContext || window.webkitAudioContext;
-      audioCtx = new AC();
-      const dest = audioCtx.createMediaStreamDestination();
-      audioCtx.createMediaStreamSource(new MediaStream([sys])).connect(dest);
-      micGain = audioCtx.createGain();
-      audioCtx.createMediaStreamSource(new MediaStream([mic])).connect(micGain);
-      micGain.connect(dest);
-      stream.removeTrack(sys);
-      stream.addTrack(dest.stream.getAudioTracks()[0]);
-      audioCtx.resume().catch(() => {});
-    } catch (e) { micGain = null; stream.addTrack(mic); }
-  } else if (mic) {
-    stream.addTrack(mic);
-  }
   myStream = stream;
   myKind = kind;
-  applyMic();
-
-  if (!mic) msgK('micDenied');
-  else if (kind === 'screen' && !sys) msgK('noSysAudio');
+  hasAudio = stream.getAudioTracks().length > 0;
+  if (kind === 'screen' && !hasAudio) msgK('noSysAudio');
+  else if (kind === 'cam' && !hasAudio && camAudioFailed) msgK('camNoAudio');
   else msg('');
-  setTimeout(() => { if (['micDenied', 'noSysAudio'].includes(msgKey())) msg(''); }, 9000);
+  setTimeout(() => { if (['camNoAudio', 'noSysAudio'].includes(msgKey())) msg(''); }, 9000);
 
   const vt = stream.getVideoTracks()[0];
   vt.contentHint = kind === 'screen' ? (q.fps >= 60 ? 'motion' : 'detail') : 'motion';
@@ -854,9 +843,7 @@ function stopShare() {
   const s = myStream;
   myStream = null; myKind = null;
   s.getTracks().forEach(t => { t.onended = null; t.stop(); });
-  [micTrack, sysTrack].forEach(t => { try { t && t.stop(); } catch (e) {} });
-  micTrack = null; sysTrack = null; micGain = null;
-  if (audioCtx) { try { audioCtx.close(); } catch (e) {} audioCtx = null; }
+  hasAudio = false;
   const list = [...calls.values()]; calls.clear(); list.forEach(c => c.close());
   removeTile('me');
   broadcast({ t: 'sharing', on: false });
@@ -910,17 +897,30 @@ function updateButtons() {
   $('btnStop').disabled = !myStream;
   $('btnScreen').textContent = !canShareScreen ? T('btnScreenNA') : myKind === 'screen' ? T('btnScreenRe') : T('btnScreen');
   $('btnCam').textContent = myKind === 'cam' ? T('btnCamRe') : T('btnCam');
-  $('btnMic').textContent = !canUseCamera ? T('micNA') : micOn ? T('micOn') : T('micOff');
-  $('btnMic').disabled = !canUseCamera;
 }
 
 /* =====================  INTERFACE  ===================== */
+let masterVol = (() => {
+  try { const v = parseFloat(localStorage.getItem('sala-vol')); return isNaN(v) ? 1 : Math.min(1, Math.max(0, v)); }
+  catch (e) { return 1; }
+})();
+function applyVolume(t) {
+  try { t.video.volume = Math.min(1, Math.max(0, masterVol * (t.vol == null ? 1 : t.vol))); } catch (e) {}
+}
+$('vol').value = Math.round(masterVol * 100);
+$('vol').oninput = () => {
+  masterVol = $('vol').value / 100;
+  try { localStorage.setItem('sala-vol', String(masterVol)); } catch (e) {}
+  tiles.forEach(t => { if (!t.local) applyVolume(t); });
+};
+
 function updateSoundBtn(t) {
   if (!t.snd) return;
   t.snd.textContent = t.video.muted ? '🔇 ' + T('soundOn') : '🔊 ' + T('soundOff');
 }
 function updateTileTexts(t) {
   if (t.hbtn) t.hbtn.textContent = '🙈 ' + T('hideBtn');
+  if (t.vslider) t.vslider.title = T('volTile');
   updateSoundBtn(t);
 }
 
@@ -942,7 +942,7 @@ function showTile(id, stream, call, isLocal) {
     const video = document.createElement('video'); video.autoplay = true; video.playsInline = true;
     const label = document.createElement('div'); label.className = 'label';
     el.append(video);
-    t = { el, video, label, call: null, stream: null, note: null, snd: null, hbtn: null, noPreview: false, timer: 0, fps: 0, res: '', lastFrames: 0, lastT: 0, created: performance.now(), userMuted: false, local: !!isLocal };
+    t = { el, video, label, call: null, stream: null, note: null, snd: null, hbtn: null, noPreview: false, timer: 0, fps: 0, res: '', lastFrames: 0, lastT: 0, created: performance.now(), userMuted: false, local: !!isLocal, vol: 1, vslider: null };
     // Ver a própria tela dentro da própria tela gera um "espelho infinito" e pesa; mostramos um aviso.
     if (isLocal && myKind === 'screen') {
       t.noPreview = true;
@@ -970,6 +970,14 @@ function showTile(id, stream, call, isLocal) {
       t.hbtn = document.createElement('button'); t.hbtn.className = 'tbtn hide';
       t.hbtn.onclick = e => { e.stopPropagation(); toggleHide(id); };
       el.append(t.hbtn);
+      // volume desta transmissão (vale junto com o volume geral da barra de baixo)
+      t.vslider = document.createElement('input'); t.vslider.type = 'range'; t.vslider.className = 'tvol';
+      t.vslider.min = 0; t.vslider.max = 100; t.vslider.value = 100;
+      t.vslider.oninput = () => { t.vol = t.vslider.value / 100; applyVolume(t); };
+      t.vslider.onclick = e => e.stopPropagation();
+      t.vslider.ondblclick = e => e.stopPropagation();
+      el.append(t.vslider);
+      applyVolume(t);
     }
     el.ondblclick = () => { if (document.fullscreenElement) document.exitFullscreen(); else el.requestFullscreen(); };
     if (hidden.has(id)) el.classList.add('hidden');
