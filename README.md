@@ -4,7 +4,7 @@
 
 **Compartilhe sua tela em segundos. Sem cadastros, 100% gratuito e Open-Source.**
 
-![Open Source Love(https://badges.frapsoft.com/os/v1/open-source.svg?v=103)](https://github.com/netspya/netshare)
+[![Open Source Love](https://badges.frapsoft.com/os/v1/open-source.svg?v=103)](https://github.com/netspya/netshare)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 </div>
