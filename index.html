@@ -188,7 +188,8 @@ $('btnJoin').onclick = async () => {
   }
   const rs = slug(room);
   myName = name;
-  hostId = 'sala-share-' + rs;
+  // Usamos um sufixo fixo curto baseado no hash para identificar o coordenador da sala de forma única
+  hostId = 'share-room-v2-' + rs;
   roomPass = await hashPass(rs, $('inPass').value);
   $('btnJoin').disabled = false;
   $('roomName').textContent = room;
@@ -216,6 +217,8 @@ function closeAll() {
 function start() {
   closeAll(); resetState();
   leaving = false; denied = false;
+  
+  // Criamos o Peer com ID aleatório para evitar conflitos de conexão inicial do cliente
   const me = new Peer();
   peer = me;
 
@@ -244,52 +247,12 @@ function start() {
 
 function tryJoinOrHost() {
   if (leaving || !peer) return;
-  const c = peer.connect(hostId, { reliable: true });
-  lobbyConn = c;
   
-  const timer = setTimeout(() => {
-    if (lobbyConn === c) {
-      try { c.close(); } catch(_) {}
-      lobbyConn = null;
-      becomeHost();
-    }
-  }, 3500);
-
-  c.on('open', () => {
-    clearTimeout(timer);
-    c.send({ t: 'join', id: peer.id, name: myName, pass: roomPass });
-  });
-
-  c.on('data', d => {
-    if (d.t === 'peers') {
-      clearTimeout(timer);
-      msg(d.list.length ? 'Conectando aos participantes...' : 'Sala encontrada com sucesso!');
-      d.list.forEach(id => dial(id));
-    } else if (d.t === 'denied') {
-      clearTimeout(timer);
-      denied = true;
-      kickOut(d.reason);
-    }
-  });
-
-  c.on('close', () => {
-    clearTimeout(timer);
-    if (lobbyConn === c) {
-      lobbyConn = null;
-      if (!lobby && !leaving && !denied) {
-        setTimeout(tryJoinOrHost, 2000);
-      }
-    }
-  });
-
-  c.on('error', () => {
-    clearTimeout(timer);
-  });
-}
-
-function becomeHost() {
-  if (lobby || leaving || !peer) return;
+  // Tentamos registar o ID fixo da sala temporariamente. 
+  // Se o registo tiver sucesso, nós somos os primeiros (anfitriões).
+  // Se falhar com 'unavailable-id', significa que a sala já tem um anfitrião ativo!
   const l = new Peer(hostId);
+  
   l.on('open', () => {
     if (leaving || !peer) { try { l.destroy(); } catch (e) {} return; }
     lobby = l;
@@ -299,16 +262,48 @@ function becomeHost() {
     l.on('connection', handleLobbyConn);
     msg('Sala criada. Aguardando participantes...');
   });
+
   l.on('error', e => {
     if (e.type === 'unavailable-id') {
       try { l.destroy(); } catch (_) {}
-      setTimeout(tryJoinOrHost, 1000);
+      // A sala já existe! Agora ligamo-nos a ela como clientes normais usando o ID fixo do anfitrião
+      connectToExistingHost();
     } else {
       msg('Erro na sala: ' + e.type);
     }
   });
-  l.on('disconnected', () => { if (lobby === l && !l.destroyed) { try { l.reconnect(); } catch (_) {} } });
-  l.on('close', () => { if (lobby === l) { lobby = null; members.clear(); } });
+}
+
+function connectToExistingHost() {
+  if (leaving || !peer) return;
+  const c = peer.connect(hostId, { reliable: true });
+  lobbyConn = c;
+
+  c.on('open', () => {
+    c.send({ t: 'join', id: peer.id, name: myName, pass: roomPass });
+  });
+
+  c.on('data', d => {
+    if (d.t === 'peers') {
+      msg(d.list.length ? 'Conectando aos participantes...' : 'Sala encontrada com sucesso!');
+      d.list.forEach(id => dial(id));
+    } else if (d.t === 'denied') {
+      denied = true;
+      kickOut(d.reason);
+    }
+  });
+
+  c.on('close', () => {
+    if (lobbyConn === c) {
+      lobbyConn = null;
+      if (!leaving && !denied) {
+        msg('A conexão com a sala caiu. Tentando reconectar...');
+        setTimeout(tryJoinOrHost, 3000);
+      }
+    }
+  });
+
+  c.on('error', () => {});
 }
 
 function handleLobbyConn(c) {
