@@ -55,12 +55,6 @@
   #controls { grid-column:1/-1; display:flex; gap:8px; flex-wrap:wrap; align-items:center; background:var(--card); padding:8px 10px; border-radius:12px; }
   #controls .sp { flex:1; }
   #msg { color:#f0b429; font-size:.85rem; }
-  #netBox { position:fixed; inset:0; background:rgba(0,0,0,.65); z-index:50; display:grid; place-items:center; padding:16px; }
-  .netcard { background:var(--card); border-radius:14px; padding:18px; max-width:540px; width:100%; max-height:92vh; overflow:auto; display:grid; gap:10px; }
-  .netcard h3 { margin:0; }
-  #netOut { white-space:pre-wrap; font-size:.85rem; margin:0; background:#14161a; padding:10px; border-radius:8px; font-family:ui-monospace,monospace; }
-  .netcard details input { width:100%; margin-top:6px; }
-  .netcard .row { display:flex; gap:8px; flex-wrap:wrap; }
   @media (max-width:800px) {
     #room { grid-template-columns:minmax(0,1fr); grid-template-rows:auto minmax(0,1fr) auto auto; padding-top:56px; }
     header { padding-right:0; }
@@ -92,7 +86,6 @@
   <button id="btnJoin" data-i18n="btnJoin"></button>
   <p class="mut" data-i18n="joinNote"></p>
   <p class="mut" id="verTxt" style="text-align:center;margin:0"></p>
-  <button id="btnNetJoin" class="sec" data-i18n="btnNet"></button>
 </section>
 
 <section id="room" class="hidden">
@@ -101,7 +94,6 @@
     <span id="msg"></span>
     <span id="status" class="mut"></span>
     <button id="btnLink" class="sec" data-i18n="copyLink"></button>
-    <button id="btnNetRoom" class="sec" data-i18n="btnNet"></button>
   </header>
 
   <div id="grid">
@@ -146,22 +138,6 @@
   </div>
 </section>
 
-<div id="netBox" class="hidden">
-  <div class="netcard">
-    <h3 data-i18n="netTitle"></h3>
-    <pre id="netOut"></pre>
-    <details>
-      <summary data-i18n="netAdv"></summary>
-      <p class="mut" data-i18n="netAdvNote"></p>
-      <input id="tUrl" placeholder="turn:servidor:3478" autocomplete="off" autocapitalize="off">
-      <input id="tUser" data-i18n-ph="netUser" autocomplete="off" autocapitalize="off">
-      <input id="tPass" data-i18n-ph="netPass" autocomplete="off" autocapitalize="off">
-      <button id="tSave" style="margin-top:8px" data-i18n="netSave"></button>
-    </details>
-    <div class="row"><button id="btnNetRun" data-i18n="netAgain"></button><button id="btnNetClose" class="sec" data-i18n="netClose"></button></div>
-  </div>
-</div>
-
 <script>
 const $ = id => document.getElementById(id);
 
@@ -191,15 +167,6 @@ const I18N = {
   connFail:'Não foi possível conectar com um participante: a rede bloqueou a conexão direta (comum em 4G/5G e em redes de empresa ou escola). Tente outra rede, como Wi-Fi.',
   oldVersion:'O site de {name} está em outra versão (v{ver}). Peça para recarregar a página (Ctrl+F5) e faça o mesmo no seu aparelho.',
   statusLine:'Servidor: {srv} · vaga {slot} · conectados: {n} · v{ver}', srvOk:'ok', srvOff:'sem conexão', srvWait:'conectando',
-  btnNet:'Testar rede', netTitle:'Teste de rede', netRunning:'Testando... pode levar até 8 segundos.',
-  netNoRtc:'Este navegador não suporta conexão em tempo real (WebRTC).',
-  netStun:'Internet (STUN): {r}', netTurn:'Retransmissão ({name}): {r}', okWord:'ok', failWord:'falhou',
-  netOk:'Há servidor de retransmissão funcionando. Se os aparelhos ainda não se encontrarem, anote este resultado dos dois lados.',
-  netBad:'Nenhum servidor de retransmissão respondeu. Entre aparelhos que não se enxergam direto (Wi-Fi com isolamento, redes diferentes), a conexão vai falhar. Cadastre um servidor TURN próprio e gratuito abaixo.',
-  netAdv:'Servidor de retransmissão próprio (opcional)',
-  netAdvNote:'Crie uma conta gratuita em metered.ca (ou outro serviço TURN), copie o endereço, o usuário e a senha e cole aqui. Faça isso em todos os aparelhos.',
-  netUser:'Usuário', netPass:'Senha', netSave:'Salvar', netSaved:'Salvo. Vale na próxima vez que você entrar numa sala.',
-  netAgain:'Testar de novo', netClose:'Fechar', netSaved2:'Servidor próprio',
   serverDown:'Servidor de conexão indisponível. Tentando de novo...', reconnecting:'Reconectando à sala...', errConn:'Erro de conexão: {e}',
   eName:'Já existe alguém com esse nome nesta sala. Escolha outro nome (ou aguarde alguns segundos se você acabou de recarregar a página).',
   eRequired:'Esta sala exige senha. Digite a senha para entrar.', eOpen:'Esta sala não usa senha. Deixe o campo de senha vazio.',
@@ -241,15 +208,6 @@ const I18N = {
   connFail:'Could not connect to a participant: the network blocked the direct connection (common on 4G/5G and company or school networks). Try another network, such as Wi-Fi.',
   oldVersion:'{name}\'s site is on a different version (v{ver}). Ask them to reload the page (Ctrl+F5) and do the same on your device.',
   statusLine:'Server: {srv} · slot {slot} · connected: {n} · v{ver}', srvOk:'ok', srvOff:'offline', srvWait:'connecting',
-  btnNet:'Test network', netTitle:'Network test', netRunning:'Testing... it may take up to 8 seconds.',
-  netNoRtc:'This browser does not support real-time connections (WebRTC).',
-  netStun:'Internet (STUN): {r}', netTurn:'Relay ({name}): {r}', okWord:'ok', failWord:'failed',
-  netOk:'A relay server is working. If the devices still do not find each other, note this result from both sides.',
-  netBad:'No relay server answered. Between devices that cannot see each other directly (isolated Wi-Fi, different networks), the connection will fail. Add your own free TURN server below.',
-  netAdv:'Your own relay server (optional)',
-  netAdvNote:'Create a free account at metered.ca (or another TURN service), copy the address, user and password, and paste them here. Do this on every device.',
-  netUser:'User', netPass:'Password', netSave:'Save', netSaved:'Saved. It applies the next time you join a room.',
-  netAgain:'Test again', netClose:'Close', netSaved2:'Your server',
   serverDown:'Connection server unavailable. Trying again...', reconnecting:'Reconnecting to the room...', errConn:'Connection error: {e}',
   eName:'Someone with that name is already in this room. Choose another name (or wait a few seconds if you just reloaded the page).',
   eRequired:'This room requires a password. Type the password to join.', eOpen:'This room has no password. Leave the password field empty.',
@@ -291,15 +249,6 @@ const I18N = {
   connFail:'Não foi possível ligar a um participante: a rede bloqueou a ligação direta (comum em 4G/5G e redes de empresas ou escolas). Tente outra rede, como Wi-Fi.',
   oldVersion:'O site de {name} está noutra versão (v{ver}). Peça para recarregar a página (Ctrl+F5) e faça o mesmo no seu dispositivo.',
   statusLine:'Servidor: {srv} · vaga {slot} · ligados: {n} · v{ver}', srvOk:'ok', srvOff:'sem ligação', srvWait:'a ligar',
-  btnNet:'Testar rede', netTitle:'Teste de rede', netRunning:'A testar... pode demorar até 8 segundos.',
-  netNoRtc:'Este navegador não suporta ligações em tempo real (WebRTC).',
-  netStun:'Internet (STUN): {r}', netTurn:'Retransmissão ({name}): {r}', okWord:'ok', failWord:'falhou',
-  netOk:'Há um servidor de retransmissão a funcionar. Se os dispositivos ainda não se encontrarem, anote este resultado nos dois lados.',
-  netBad:'Nenhum servidor de retransmissão respondeu. Entre dispositivos que não se veem diretamente (Wi-Fi com isolamento, redes diferentes), a ligação vai falhar. Registe abaixo um servidor TURN próprio e gratuito.',
-  netAdv:'Servidor de retransmissão próprio (opcional)',
-  netAdvNote:'Crie uma conta gratuita em metered.ca (ou outro serviço TURN), copie o endereço, o utilizador e a palavra-passe e cole aqui. Faça-o em todos os dispositivos.',
-  netUser:'Utilizador', netPass:'Palavra-passe', netSave:'Guardar', netSaved:'Guardado. Vale na próxima vez que entrar numa sala.',
-  netAgain:'Testar novamente', netClose:'Fechar', netSaved2:'O seu servidor',
   serverDown:'Servidor de ligação indisponível. A tentar novamente...', reconnecting:'A religar à sala...', errConn:'Erro de ligação: {e}',
   eName:'Já existe alguém com esse nome nesta sala. Escolha outro nome (ou aguarde alguns segundos se acabou de recarregar a página).',
   eRequired:'Esta sala exige palavra-passe. Escreva a palavra-passe para entrar.', eOpen:'Esta sala não usa palavra-passe. Deixe o campo vazio.',
@@ -386,90 +335,22 @@ function loadPeer() {
   return peerLoad;
 }
 // Começa a baixar assim que a pessoa clica em qualquer campo (ganha tempo sem gastar à toa)
-$('join').addEventListener('focusin', () => { loadPeer(); probeAllTurn(); }, { once: true });
+$('join').addEventListener('focusin', () => loadPeer(), { once: true });
 
 /* =====================  REDE (celular x computador)  =====================
    Celulares em 4G/5G ficam atrás de redes que bloqueiam a conexão direta; nesses casos o
    vídeo passa por um servidor de retransmissão (TURN). Se tiver um servidor TURN seu,
    coloque-o em CUSTOM_TURN. Exemplo:
    const CUSTOM_TURN = [{ urls: 'turn:meu-servidor.com:3478', username: 'usuario', credential: 'senha' }];  */
-const APP_VERSION = '6';
+const APP_VERSION = '5';
 const CUSTOM_TURN = [];
-const STUN_LIST = ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302', 'stun:global.stun.twilio.com:3478', 'stun:stun.cloudflare.com:3478'];
-const TURN_LIST = [
-  { name: 'PeerJS', urls: ['turn:eu-0.turn.peerjs.com:3478', 'turn:us-0.turn.peerjs.com:3478'], username: 'peerjs', credential: 'peerjsp' },
-  { name: 'OpenRelay', urls: ['turn:openrelay.metered.ca:80', 'turn:openrelay.metered.ca:443', 'turn:openrelay.metered.ca:443?transport=tcp'], username: 'openrelayproject', credential: 'openrelayproject' },
-  { name: 'FreeSTUN', urls: ['turn:freestun.net:3478', 'turns:freestun.net:5349'], username: 'free', credential: 'free' }
-];
-function userTurn() {
-  try {
-    const o = JSON.parse(localStorage.getItem('sala-turn') || 'null');
-    if (o && o.url) return { name: T('netSaved2'), urls: o.url.split(/[\s,]+/).filter(Boolean), username: o.user || undefined, credential: o.pass || undefined };
-  } catch (e) {}
-  return null;
-}
-const allTurns = () => TURN_LIST.concat(CUSTOM_TURN.map((c, i) => Object.assign({ name: 'Custom ' + (i + 1) }, c)), userTurn() ? [userTurn()] : []);
-let turnProbe = { started: false, done: false, ok: {}, promise: null };
-
-// Descobre quais servidores de retransmissão realmente respondem nesta rede
-function probeIce(servers, policy, re, ms) {
-  return new Promise(resolve => {
-    let done = false, pc;
-    const finish = ok => { if (done) return; done = true; try { pc.close(); } catch (e) {} resolve(ok); };
-    try { pc = new RTCPeerConnection({ iceServers: servers, iceTransportPolicy: policy }); } catch (e) { return resolve(false); }
-    try { pc.createDataChannel('t'); } catch (e) {}
-    pc.onicecandidate = e => {
-      if (e.candidate && re.test(e.candidate.candidate)) finish(true);
-      else if (!e.candidate) finish(false);
-    };
-    pc.createOffer().then(o => pc.setLocalDescription(o)).catch(() => finish(false));
-    setTimeout(() => finish(false), ms);
-  });
-}
-function strip(t) { return { urls: t.urls, username: t.username, credential: t.credential }; }
-function probeAllTurn(force) {
-  if (typeof RTCPeerConnection === 'undefined') return Promise.resolve();
-  if (turnProbe.started && !force) return turnProbe.promise;
-  turnProbe = { started: true, done: false, ok: {}, promise: null };
-  const tp = turnProbe;
-  tp.promise = Promise.all(allTurns().map(async t => { tp.ok[t.name] = await probeIce([strip(t)], 'relay', /typ relay/, 6000); }))
-    .then(() => { tp.done = true; });
-  return tp.promise;
-}
-// Só usa os servidores que responderam (se nenhum respondeu, tenta todos mesmo assim)
-function buildPeerOpts() {
-  let turns = allTurns();
-  if (turnProbe.done) { const w = turns.filter(t => turnProbe.ok[t.name]); if (w.length) turns = w; }
-  return { config: { sdpSemantics: 'unified-plan', iceServers: STUN_LIST.map(u => ({ urls: u })).concat(turns.map(strip)) } };
-}
-
-// Caixa "Testar rede"
-async function runNetTest() {
-  $('netBox').classList.remove('hidden');
-  const out = $('netOut');
-  if (typeof RTCPeerConnection === 'undefined') { out.textContent = T('netNoRtc'); return; }
-  out.textContent = T('netRunning');
-  try { const u = JSON.parse(localStorage.getItem('sala-turn') || 'null') || {}; $('tUrl').value = u.url || ''; $('tUser').value = u.user || ''; $('tPass').value = u.pass || ''; } catch (e) {}
-  const [stun] = await Promise.all([
-    probeIce(STUN_LIST.map(u => ({ urls: u })), 'all', /typ srflx/, 6000),
-    probeAllTurn(true)
-  ]);
-  const yn = ok => T(ok ? 'okWord' : 'failWord');
-  const lines = [T('netStun', { r: yn(stun) })];
-  allTurns().forEach(t => lines.push(T('netTurn', { name: t.name, r: yn(turnProbe.ok[t.name]) })));
-  const anyRelay = allTurns().some(t => turnProbe.ok[t.name]);
-  lines.push('', T(anyRelay ? 'netOk' : 'netBad'));
-  out.textContent = lines.join('\n');
-}
-$('btnNetJoin').onclick = runNetTest;
-$('btnNetRoom').onclick = runNetTest;
-$('btnNetRun').onclick = runNetTest;
-$('btnNetClose').onclick = () => $('netBox').classList.add('hidden');
-$('tSave').onclick = () => {
-  try { localStorage.setItem('sala-turn', JSON.stringify({ url: $('tUrl').value.trim(), user: $('tUser').value.trim(), pass: $('tPass').value.trim() })); } catch (e) {}
-  $('netOut').textContent = T('netSaved');
-  turnProbe = { started: false, done: false, ok: {}, promise: null };
-};
+const PEER_OPTS = { config: { sdpSemantics: 'unified-plan', iceServers: [
+  { urls: 'stun:stun.l.google.com:19302' },
+  { urls: 'stun:stun1.l.google.com:19302' },
+  { urls: 'stun:global.stun.twilio.com:3478' },
+  { urls: ['turn:eu-0.turn.peerjs.com:3478', 'turn:us-0.turn.peerjs.com:3478'], username: 'peerjs', credential: 'peerjsp' },
+  { urls: ['turn:openrelay.metered.ca:80', 'turn:openrelay.metered.ca:443', 'turn:openrelay.metered.ca:443?transport=tcp'], username: 'openrelayproject', credential: 'openrelayproject' }
+].concat(CUSTOM_TURN) } };
 // Ajustes de SDP "x-google-*" só existem no Chrome/Edge/Brave; Safari e Firefox (inclusive no iPhone) ficam sem mexer.
 const IS_CHROMIUM = /Chrome\/|Chromium\/|Edg\//.test(navigator.userAgent) && !/CriOS|FxiOS|iPhone|iPad|iPod/.test(navigator.userAgent);
 const kill = p => { try { p._dead = true; p.destroy(); } catch (e) {} };
@@ -574,7 +455,7 @@ function claimSlot(i) {
   if (leaving) return;
   if (i >= MAX_SLOTS) { kickOut('full'); return; }
   let opened = false;
-  const me = new Peer(baseId + '_' + i, buildPeerOpts());
+  const me = new Peer(baseId + '_' + i, PEER_OPTS);
   peer = me;
 
   me.on('open', id => {
