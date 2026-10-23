@@ -188,8 +188,8 @@ $('btnJoin').onclick = async () => {
   }
   const rs = slug(room);
   myName = name;
-  // Usamos um sufixo fixo curto baseado no hash para identificar o coordenador da sala de forma única
-  hostId = 'share-room-v2-' + rs;
+  // Identificador único robusto da sala combinando prefixo fixo e o slug da sala
+  hostId = 'netspya-share-v3-' + rs;
   roomPass = await hashPass(rs, $('inPass').value);
   $('btnJoin').disabled = false;
   $('roomName').textContent = room;
@@ -218,7 +218,7 @@ function start() {
   closeAll(); resetState();
   leaving = false; denied = false;
   
-  // Criamos o Peer com ID aleatório para evitar conflitos de conexão inicial do cliente
+  // Criamos o Peer com ID puramente aleatório para eliminar conflitos iniciais do cliente
   const me = new Peer();
   peer = me;
 
@@ -230,7 +230,10 @@ function start() {
       call.on('close', () => { const t = tiles.get(call.peer); if (t && t.call === call) removeTile(call.peer); });
     });
     msg('Procurando pela sala...');
-    tryJoinOrHost();
+    
+    // Tentamos conectar diretamente ao host existente primeiro.
+    // Se a conexão falhar ou recusar por não existir, criamos a sala.
+    tryConnectAsClientFirst();
   });
 
   me.on('error', e => {
@@ -240,46 +243,33 @@ function start() {
       if (m) dialing.delete(m[1]);
       return;
     }
-    msg('Erro de conexão: ' + e.type);
   });
   me.on('disconnected', () => { if (me === peer && !me.destroyed) { try { me.reconnect(); } catch (e) {} } });
 }
 
-function tryJoinOrHost() {
+function tryConnectAsClientFirst() {
   if (leaving || !peer) return;
   
-  // Tentamos registar o ID fixo da sala temporariamente. 
-  // Se o registo tiver sucesso, nós somos os primeiros (anfitriões).
-  // Se falhar com 'unavailable-id', significa que a sala já tem um anfitrião ativo!
-  const l = new Peer(hostId);
-  
-  l.on('open', () => {
-    if (leaving || !peer) { try { l.destroy(); } catch (e) {} return; }
-    lobby = l;
-    members.clear();
-    members.set(peer.id, myName);
-    people.forEach((p, id) => members.set(id, p.name));
-    l.on('connection', handleLobbyConn);
-    msg('Sala criada. Aguardando participantes...');
-  });
-
-  l.on('error', e => {
-    if (e.type === 'unavailable-id') {
-      try { l.destroy(); } catch (_) {}
-      // A sala já existe! Agora ligamo-nos a ela como clientes normais usando o ID fixo do anfitrião
-      connectToExistingHost();
-    } else {
-      msg('Erro na sala: ' + e.type);
-    }
-  });
-}
-
-function connectToExistingHost() {
-  if (leaving || !peer) return;
   const c = peer.connect(hostId, { reliable: true });
   lobbyConn = c;
+  
+  let settled = false;
+
+  const timer = setTimeout(() => {
+    if (!settled) {
+      settled = true;
+      try { c.close(); } catch(_) {}
+      lobbyConn = null;
+      // Ninguém respondeu no tempo limite, logo a sala não existe. Tornamo-nos o anfitrião!
+      becomeHost();
+    }
+  }, 3000);
 
   c.on('open', () => {
+    if (settled) return;
+    settled = true;
+    clearTimeout(timer);
+    // Conectou com sucesso ao host existente! Enviamos dados de entrada
     c.send({ t: 'join', id: peer.id, name: myName, pass: roomPass });
   });
 
@@ -294,16 +284,52 @@ function connectToExistingHost() {
   });
 
   c.on('close', () => {
-    if (lobbyConn === c) {
+    if (lobbyConn === c && !settled) {
+      settled = true;
+      clearTimeout(timer);
       lobbyConn = null;
-      if (!leaving && !denied) {
-        msg('A conexão com a sala caiu. Tentando reconectar...');
-        setTimeout(tryJoinOrHost, 3000);
-      }
+      becomeHost();
     }
   });
 
-  c.on('error', () => {});
+  c.on('error', () => {
+    if (!settled) {
+      settled = true;
+      clearTimeout(timer);
+      try { c.close(); } catch(_) {}
+      lobbyConn = null;
+      becomeHost();
+    }
+  });
+}
+
+function becomeHost() {
+  if (lobby || leaving || !peer) return;
+  
+  const l = new Peer(hostId);
+  
+  l.on('open', () => {
+    if (leaving || !peer) { try { l.destroy(); } catch (e) {} return; }
+    lobby = l;
+    members.clear();
+    members.set(peer.id, myName);
+    people.forEach((p, id) => members.set(id, p.name));
+    l.on('connection', handleLobbyConn);
+    msg('Sala criada. Aguardando participantes...');
+  });
+
+  l.on('error', e => {
+    if (e.type === 'unavailable-id') {
+      // Se o ID já estiver ocupado (por exemplo, race condition extrema), tentamos entrar como cliente de novo
+      try { l.destroy(); } catch (_) {}
+      setTimeout(tryConnectAsClientFirst, 1000);
+    } else {
+      msg('Erro na sala: ' + e.type);
+    }
+  });
+
+  l.on('disconnected', () => { if (lobby === l && !l.destroyed) { try { l.reconnect(); } catch (_) {} } });
+  l.on('close', () => { if (lobby === l) { lobby = null; members.clear(); } });
 }
 
 function handleLobbyConn(c) {
