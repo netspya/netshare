@@ -91,12 +91,6 @@
   <div id="controls">
     <button id="btnScreen">Compartilhar tela</button>
     <button id="btnCam" class="sec">Ligar câmera</button>
-    <label class="mut">Câmera:
-      <select id="facing">
-        <option value="user" selected>Frontal</option>
-        <option value="environment">Traseira</option>
-      </select>
-    </label>
     <button id="btnStop" class="bad" disabled>Parar</button>
     <label class="mut">Fluidez:
       <select id="fps">
@@ -498,25 +492,7 @@ function callPeer(id) {
   scheduleQuality();
 }
 
-// Celulares (Android e iPhone) não permitem compartilhar tela pelo navegador: é uma limitação deles.
-const canShareScreen = !!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia);
-const canUseCamera = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
-if (!canShareScreen) {
-  $('btnScreen').disabled = true;
-  $('btnScreen').title = 'Este navegador não permite compartilhar a tela. Use um computador (Chrome, Edge ou Firefox).';
-}
-$('facing').onchange = () => { if (myKind === 'cam') share('cam'); };
-if (!canShareScreen) $('btnScreen').textContent = 'Tela indisponível neste aparelho';
-
 async function share(kind) {
-  if (kind === 'screen' && !canShareScreen) {
-    msg('Este aparelho/navegador não permite compartilhar a tela. Use um computador, ou ligue a câmera.');
-    return;
-  }
-  if (kind === 'cam' && !canUseCamera) {
-    msg('A câmera só funciona em páginas seguras (https). Abra o endereço https do site.');
-    return;
-  }
   if (myStream) stopShare();
   const q = qualitySettings();
   const frameRate = { ideal: q.fps, max: q.fps };
@@ -527,7 +503,7 @@ async function share(kind) {
         audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
       });
     } else {
-      const video = { frameRate, width: { ideal: q.w }, height: { ideal: q.h }, facingMode: { ideal: $('facing').value } };
+      const video = { frameRate, width: { ideal: q.w }, height: { ideal: q.h } };
       try { myStream = await navigator.mediaDevices.getUserMedia({ video, audio: true }); }
       catch (e) { myStream = await navigator.mediaDevices.getUserMedia({ video }); }
     }
@@ -600,8 +576,7 @@ window.addEventListener('beforeunload', () => { leaving = true; closeAll(); });
 
 function updateButtons() {
   $('btnStop').disabled = !myStream;
-  $('btnScreen').textContent = !canShareScreen ? 'Tela indisponível neste aparelho'
-    : myKind === 'screen' ? 'Reiniciar tela' : 'Compartilhar tela';
+  $('btnScreen').textContent = myKind === 'screen' ? 'Reiniciar tela' : 'Compartilhar tela';
   $('btnCam').textContent = myKind === 'cam' ? 'Reiniciar câmera' : 'Ligar câmera';
 }
 
