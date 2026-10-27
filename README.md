@@ -22,7 +22,7 @@ Abra o link, coloque um nome de sua escolha, clique em compartilhar e pronto!
 
 * **🆓 100% Gratuito:** Sem planos pagos, assinaturas ou limites de uso.
 * **⚡ Sem Conta/Zero Friction:** Não exige login, e-mail ou cadastro. Entre e use imediatamente.
-* **🔓 Open-Source:** Transparência total. O código é aberto para auditagem e melhorias da comunidade.
+* **🔓 Open-Source:** Transparência total. O código é aberto para todos.
 * **🔒 Privado & Seguro:** Conexão direta e sem intermediários desnecessários.
 
 ---
