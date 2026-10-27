@@ -27,18 +27,6 @@ Abra o link, coloque um nome de sua escolha, clique em compartilhar e pronto!
 
 ---
 
-## 🤝 Como Contribuir
-
-Contribuições são super bem-vindas! Se você quer ajudar a melhorar o NetShare:
-
-1. Faça um **Fork** do projeto.
-2. Crie uma Branch para sua Feature (`git checkout -b feature/IncrivelFeature`).
-3. Faça o **Commit** de suas alterações (`git commit -m 'Adiciona nova Feature'`).
-4. Faça o **Push** para a Branch (`git push origin feature/IncrivelFeature`).
-5. Abra um **Pull Request**.
-
----
-
 <div align="center">
 
 Desenvolvido com ❤️ por Netspya.
